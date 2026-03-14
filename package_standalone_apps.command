@@ -9,6 +9,7 @@ build_dir="$project_dir/build/pyinstaller"
 find_python() {
   local python_bin=""
   for cand in \
+    "$(command -v python3 2>/dev/null || true)" \
     "$HOME/.rye/shims/python3" \
     "/opt/homebrew/bin/python3" \
     "/usr/local/bin/python3" \
