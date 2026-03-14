@@ -124,6 +124,9 @@ class RenderSettingsDialog(QDialog):
             if self.denoise_check.isChecked() and not self.ppm_denoised_only.isChecked():
                 self.ppm_denoised_only.setChecked(True)
 
+        self.denoise_check.toggled.connect(self._update_ppm_denoised_only_enabled_state)
+        self._update_ppm_denoised_only_enabled_state(self.denoise_check.isChecked())
+
         scene_override_box = QGroupBox("Scene Layout Overrides")
         scene_override_form = QFormLayout(scene_override_box)
 
@@ -201,6 +204,16 @@ class RenderSettingsDialog(QDialog):
     def _on_denoise_toggled_force_denoised_only(self, checked: bool) -> None:
         if checked and not self.ppm_denoised_only.isChecked():
             self.ppm_denoised_only.setChecked(True)
+
+    def _update_ppm_denoised_only_enabled_state(self, denoise_enabled: bool) -> None:
+        if not self.denoise_check.isEnabled():
+            self.ppm_denoised_only.setEnabled(False)
+            return
+
+        if not denoise_enabled and self.ppm_denoised_only.isChecked():
+            self.ppm_denoised_only.setChecked(False)
+
+        self.ppm_denoised_only.setEnabled(denoise_enabled)
 
     def _wire_change_signals(self, *, include_keep_frames: bool) -> None:
         assert self._on_change is not None
