@@ -5,6 +5,7 @@ import os
 import struct
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -43,7 +44,7 @@ def _read_token(stream) -> bytes:
     return bytes(token)
 
 
-def _read_ppm(path: Path) -> tuple[int, int, list[tuple[float, float, float]]]:
+def read_ppm(path: Path) -> tuple[int, int, list[tuple[float, float, float]]]:
     with path.open("rb") as f:
         magic = _read_token(f)
         if magic not in {b"P3", b"P6"}:
@@ -120,7 +121,7 @@ def _read_pfm(path: Path) -> tuple[int, int, list[tuple[float, float, float]]]:
     return width, height, pixels
 
 
-def _write_ppm(path: Path, width: int, height: int, pixels: list[tuple[float, float, float]]) -> None:
+def write_ppm(path: Path, width: int, height: int, pixels: list[tuple[float, float, float]]) -> None:
     with path.open("wb") as f:
         f.write(f"P6\n{width} {height}\n255\n".encode("ascii"))
         buf = bytearray()
@@ -133,6 +134,40 @@ def _write_ppm(path: Path, width: int, height: int, pixels: list[tuple[float, fl
                 ]
             )
         f.write(buf)
+
+
+def write_png(path: Path, width: int, height: int, pixels: list[tuple[float, float, float]]) -> None:
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # Filter type 0 (None)
+        row = pixels[y * width:(y + 1) * width]
+        for r, g, b in row:
+            raw.extend(
+                [
+                    max(0, min(255, int(round(r * 255.0)))),
+                    max(0, min(255, int(round(g * 255.0)))),
+                    max(0, min(255, int(round(b * 255.0)))),
+                ]
+            )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    idat = zlib.compress(bytes(raw), level=6)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", idat)
+        + chunk(b"IEND", b"")
+    )
+    with path.open("wb") as f:
+        f.write(png)
 
 
 def run_oidn_postprocess(output_base: Path) -> Tuple[bool, str, Optional[Path]]:
@@ -150,9 +185,9 @@ def run_oidn_postprocess(output_base: Path) -> Tuple[bool, str, Optional[Path]]:
         return False, "Missing denoise inputs: " + ", ".join(missing), None
 
     try:
-        color_w, color_h, color_pixels = _read_ppm(color)
-        albedo_w, albedo_h, albedo_pixels = _read_ppm(albedo)
-        normal_w, normal_h, normal_pixels = _read_ppm(normal)
+        color_w, color_h, color_pixels = read_ppm(color)
+        albedo_w, albedo_h, albedo_pixels = read_ppm(albedo)
+        normal_w, normal_h, normal_pixels = read_ppm(normal)
     except Exception as exc:
         return False, f"Failed to load PPM denoise inputs: {exc}", None
 
@@ -201,7 +236,7 @@ def run_oidn_postprocess(output_base: Path) -> Tuple[bool, str, Optional[Path]]:
             return False, "oidnDenoise reported success but produced no output file.", None
 
         out_w, out_h, out_pixels = _read_pfm(denoised_pfm)
-        _write_ppm(denoised, out_w, out_h, out_pixels)
+        write_ppm(denoised, out_w, out_h, out_pixels)
         return True, "OIDN denoise complete", denoised
     except Exception as exc:
         return False, f"Failed to convert denoised output: {exc}", None

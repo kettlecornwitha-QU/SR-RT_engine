@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from PySide6.QtCore import QThread, Signal
 
 from gui_runtime import packaged_runtime
-from oidn_postprocess import can_run_oidn_postprocess, run_oidn_postprocess
+from oidn_postprocess import can_run_oidn_postprocess, read_ppm, run_oidn_postprocess, write_png
 from video_config_builder import RenderTaskConfig
 from video_formula import ExpressionError, ExpressionEvaluator, float_text, velocity_vector_to_turns
 
@@ -160,12 +160,125 @@ class RenderWorker(QThread):
             return frozen_binary, frozen_oidn
         return frozen_binary, None
 
+    def _find_ffmpeg(self) -> str:
+        env_ffmpeg = os.environ.get("SR_RT_FFMPEG_BIN", "").strip()
+        ffmpeg = env_ffmpeg if env_ffmpeg and Path(env_ffmpeg).exists() else shutil.which("ffmpeg")
+        if not ffmpeg:
+            for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+                if Path(candidate).exists():
+                    ffmpeg = candidate
+                    break
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg not found. Install ffmpeg or add it to PATH.")
+        return ffmpeg
+
+    def _start_streaming_encoder(self, ffmpeg: str, video_path: Path) -> subprocess.Popen[bytes]:
+        enc_cmd = [
+            ffmpeg,
+            "-y",
+            "-loglevel",
+            "error",
+            "-framerate",
+            str(self.cfg.fps),
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "ppm",
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(video_path),
+        ]
+        proc = subprocess.Popen(
+            enc_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        proc._sr_rt_command = enc_cmd  # type: ignore[attr-defined]
+        return proc
+
+    def _final_frame_path(self, output_base: Path, denoise_enabled: bool) -> Path:
+        return output_base.with_name(output_base.name + ("_denoised" if denoise_enabled else "")).with_suffix(".ppm")
+
+    def _stream_frame_to_encoder(self, encoder: subprocess.Popen[bytes], frame_path: Path) -> None:
+        if encoder.stdin is None:
+            raise RuntimeError("ffmpeg encoder stdin is not available.")
+        try:
+            encoder.stdin.write(frame_path.read_bytes())
+            encoder.stdin.flush()
+        except BrokenPipeError:
+            stderr = b""
+            if encoder.stderr is not None:
+                try:
+                    stderr = encoder.stderr.read()
+                except Exception:
+                    stderr = b""
+            details = stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"ffmpeg encoder terminated unexpectedly.\n{details}")
+
+    def _save_png_copy(self, source_ppm: Path, destination_png: Path) -> None:
+        width, height, pixels = read_ppm(source_ppm)
+        write_png(destination_png, width, height, pixels)
+
+    def _cleanup_frame_outputs(self, output_base: Path) -> None:
+        paths = [
+            output_base.with_suffix(".ppm"),
+            output_base.with_name(output_base.name + "_denoised").with_suffix(".ppm"),
+            output_base.with_name(output_base.name + "_albedo").with_suffix(".ppm"),
+            output_base.with_name(output_base.name + "_normal").with_suffix(".ppm"),
+            output_base.with_suffix(".exr"),
+            output_base.with_suffix(".png"),
+        ]
+        for path in paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+
+    def _finalize_encoder(self, encoder: subprocess.Popen[bytes]) -> List[str]:
+        if encoder.stdin is not None and not encoder.stdin.closed:
+            encoder.stdin.close()
+        stderr_data = b""
+        if encoder.stderr is not None:
+            stderr_data = encoder.stderr.read()
+        rc = encoder.wait()
+        details = stderr_data.decode("utf-8", errors="replace").strip()
+        command = getattr(encoder, "_sr_rt_command", None)
+        if rc != 0:
+            raise RuntimeError(f"ffmpeg encode failed:\n{details[-1200:]}")
+        return list(command) if command is not None else []
+
+    def _terminate_encoder(self, encoder: Optional[subprocess.Popen[bytes]]) -> None:
+        if encoder is None:
+            return
+        try:
+            if encoder.stdin is not None and not encoder.stdin.closed:
+                encoder.stdin.close()
+        except Exception:
+            pass
+        if encoder.poll() is None:
+            try:
+                encoder.terminate()
+                encoder.wait(timeout=5)
+            except Exception:
+                try:
+                    encoder.kill()
+                except Exception:
+                    pass
+
     def run(self) -> None:
         manifest_path: Optional[Path] = None
         manifest: Dict[str, Any] = {}
         run_start = time.time()
-        temp_cleanup_dir: Optional[Path] = None
+        temp_work_dir: Optional[Path] = None
         frozen_binary_dir: Optional[Path] = None
+        encoder: Optional[subprocess.Popen[bytes]] = None
         try:
             packaged_python_denoise = packaged_runtime() and self.cfg.denoise and can_run_oidn_postprocess()
             init_env = self._evaluate_definitions(frame=0, fps=self.cfg.fps)
@@ -177,18 +290,19 @@ class RenderWorker(QThread):
             base_name = f"video_{self.cfg.scene_name}_{stamp}"
             video_path = self.cfg.output_dir / f"{base_name}.mp4"
             manifest_path = self.cfg.output_dir / f"{base_name}.manifest.json"
+            work_dir = Path(tempfile.mkdtemp(prefix="sr_rt_video_frame_"))
+            temp_work_dir = work_dir
             if self.cfg.keep_frames:
                 frames_dir = self.cfg.output_dir / f"{base_name}_frames"
                 frames_dir.mkdir(parents=True, exist_ok=True)
             else:
-                frames_dir = Path(tempfile.mkdtemp(prefix="sr_rt_video_"))
-                temp_cleanup_dir = frames_dir
+                frames_dir = None
 
             frozen_binary_dir = Path(tempfile.mkdtemp(prefix="sr_rt_bin_"))
             frozen_binary, frozen_oidn = self._freeze_runtime_bundle(frozen_binary_dir)
+            ffmpeg = self._find_ffmpeg()
+            encoder = self._start_streaming_encoder(ffmpeg, video_path)
 
-            suffix = "_denoised.ppm" if self.cfg.denoise else ".ppm"
-            frame_pattern = str(frames_dir / f"frame_%05d{suffix}")
             manifest = {
                 "manifest_schema_version": 1,
                 "status": "started",
@@ -236,15 +350,16 @@ class RenderWorker(QThread):
                 },
                 "outputs": {
                     "video_path": str(video_path),
-                    "frames_dir": str(frames_dir),
-                    "frame_pattern": frame_pattern,
-                    "uses_temp_frames_dir": temp_cleanup_dir is not None,
+                    "frames_dir": str(frames_dir) if frames_dir is not None else None,
+                    "work_dir": str(work_dir),
+                    "streaming_encode": True,
                     "manifest_path": str(manifest_path),
                 },
                 "raytracer_binary": {
                     "source": self._raytracer_binary_identity(self.cfg.raytracer_bin),
                     "frozen_for_job": self._raytracer_binary_identity(frozen_binary),
                 },
+                "ffmpeg": {"path": ffmpeg, "mode": "streaming"},
                 "progress": {
                     "frames_rendered": 0,
                     "frames_expected": total_frames,
@@ -293,7 +408,7 @@ class RenderWorker(QThread):
                 cam_pitch = self._eval_optional(str(ori_fields.get("pitch", "")), env) or 0.0
                 cam_yaw = self._eval_optional(str(ori_fields.get("yaw", "")), env) or 0.0
 
-                output_base = frames_dir / f"frame_{frame:05d}"
+                output_base = work_dir / f"frame_{frame:05d}"
                 cmd = [
                     str(frozen_binary),
                     "--scene",
@@ -376,44 +491,32 @@ class RenderWorker(QThread):
                     if not ok:
                         raise RuntimeError(f"Frame {frame} denoise failed.\n{denoise_msg}")
 
+                final_frame_path = self._final_frame_path(output_base, self.cfg.denoise)
+                if not final_frame_path.exists():
+                    raise RuntimeError(f"Frame {frame} completed but final frame output was not found: {final_frame_path}")
+
+                self._stream_frame_to_encoder(encoder, final_frame_path)
+
+                if frames_dir is not None:
+                    saved_png = frames_dir / f"frame_{frame:05d}.png"
+                    self._save_png_copy(final_frame_path, saved_png)
+
+                self._cleanup_frame_outputs(output_base)
+
                 manifest.setdefault("progress", {})["frames_rendered"] = frame + 1
                 if manifest_path is not None and ((frame + 1) % 25 == 0 or frame + 1 == total_frames):
                     self._write_manifest(manifest_path, manifest)
 
                 self.progress.emit(frame + 1, total_frames, f"Rendered frame {frame + 1}/{total_frames}")
 
-            env_ffmpeg = os.environ.get("SR_RT_FFMPEG_BIN", "").strip()
-            ffmpeg = env_ffmpeg if env_ffmpeg and Path(env_ffmpeg).exists() else shutil.which("ffmpeg")
-            if not ffmpeg:
-                for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-                    if Path(candidate).exists():
-                        ffmpeg = candidate
-                        break
-            if not ffmpeg:
-                raise RuntimeError("ffmpeg not found. Install ffmpeg or add it to PATH.")
-
-            enc_cmd = [
-                ffmpeg,
-                "-y",
-                "-framerate",
-                str(self.cfg.fps),
-                "-i",
-                frame_pattern,
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                str(video_path),
-            ]
-            enc = subprocess.run(enc_cmd, capture_output=True, text=True)
-            if enc.returncode != 0:
-                raise RuntimeError(f"ffmpeg encode failed:\n{enc.stderr[-1200:]}")
+            enc_cmd = self._finalize_encoder(encoder)
+            encoder = None
 
             manifest["status"] = "completed"
             manifest["ended_utc"] = self._now_utc_iso()
             manifest["duration_sec"] = time.time() - run_start
             manifest.setdefault("progress", {})["frames_rendered"] = total_frames
-            manifest["ffmpeg"] = {"path": ffmpeg, "command": enc_cmd}
+            manifest["ffmpeg"] = {"path": ffmpeg, "command": enc_cmd, "mode": "streaming"}
             try:
                 manifest.setdefault("outputs", {})["video_size_bytes"] = int(video_path.stat().st_size)
             except Exception:
@@ -434,7 +537,8 @@ class RenderWorker(QThread):
                     pass
             self.failed.emit(str(exc))
         finally:
-            if temp_cleanup_dir is not None and temp_cleanup_dir.exists():
-                shutil.rmtree(temp_cleanup_dir, ignore_errors=True)
+            self._terminate_encoder(encoder)
+            if temp_work_dir is not None and temp_work_dir.exists():
+                shutil.rmtree(temp_work_dir, ignore_errors=True)
             if frozen_binary_dir is not None and frozen_binary_dir.exists():
                 shutil.rmtree(frozen_binary_dir, ignore_errors=True)
