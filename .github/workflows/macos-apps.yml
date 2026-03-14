@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-macos-apps:
     name: Package Image/Video Renderer Apps
@@ -13,17 +16,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install Homebrew dependencies
         run: |
-          brew update
-          brew install cmake ffmpeg
+          brew list cmake >/dev/null 2>&1 || brew install cmake
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
 
       - name: Install GUI packaging dependencies
         run: |
