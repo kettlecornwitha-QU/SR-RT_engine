@@ -83,7 +83,7 @@ jobs:
               --notes "Automated release for $tag"
 
           gh release upload "$tag" \
-            release_artifacts/Image Renderer.app.zip \
-            release_artifacts/Video Renderer.app.zip \
-            release_artifacts/SHA256SUMS.txt \
+            "release_artifacts/Image Renderer.app.zip" \
+            "release_artifacts/Video Renderer.app.zip" \
+            "release_artifacts/SHA256SUMS.txt" \
             --clobber
