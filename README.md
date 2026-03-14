@@ -1,5 +1,8 @@
 # SR-RT_engine
 
+Download the packaged apps from **GitHub Releases**:
+- https://github.com/kettlecornwitha-QU/SR-RT_engine/releases
+
 Single-file CPU path tracer with:
 - BVH acceleration + triangles + OBJ loading
 - GGX metal + dielectric + Lambertian + emissive
@@ -11,7 +14,8 @@ Single-file CPU path tracer with:
 ## For Users
 
 If you just want to use the renderers on an Apple Silicon Mac, the intended path is:
-- go to **GitHub Releases**
+- go to **GitHub Releases**:
+  https://github.com/kettlecornwitha-QU/SR-RT_engine/releases
 - download the packaged `.app.zip` files
 - unzip and open the apps
 
