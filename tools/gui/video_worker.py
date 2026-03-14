@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import QThread, Signal
+
+from gui_runtime import packaged_runtime
+from oidn_postprocess import can_run_oidn_postprocess, run_oidn_postprocess
+from video_config_builder import RenderTaskConfig
+from video_formula import ExpressionError, ExpressionEvaluator, float_text, velocity_vector_to_turns
+
+
+class RenderWorker(QThread):
+    progress = Signal(int, int, str)
+    failed = Signal(str)
+    paused = Signal(bool)
+    done = Signal(str)
+
+    def __init__(self, cfg: RenderTaskConfig) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self._abort = False
+        self._pause = False
+        self._lock = threading.Lock()
+        self.eval = ExpressionEvaluator()
+
+    def request_abort(self) -> None:
+        with self._lock:
+            self._abort = True
+
+    def request_pause(self, pause: bool) -> None:
+        with self._lock:
+            self._pause = pause
+        self.paused.emit(pause)
+
+    def _is_abort(self) -> bool:
+        with self._lock:
+            return self._abort
+
+    def _is_pause(self) -> bool:
+        with self._lock:
+            return self._pause
+
+    def _evaluate_definitions(self, frame: int, fps: int) -> Dict[str, float]:
+        env: Dict[str, float] = {
+            "frame": float(frame),
+            "fps": float(fps),
+            "time": float(frame) / float(fps),
+        }
+        for line in self.cfg.definitions:
+            if "=" not in line:
+                continue
+            name, expr = line.split("=", 1)
+            name = name.strip()
+            expr = expr.strip()
+            if not name or not expr:
+                continue
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ExpressionError(f"Invalid definition name: {name}")
+            env[name] = self.eval.eval(expr, env)
+        return env
+
+    def _select_row(self, rows: List[Dict[str, object]], frame: int, env: Dict[str, float]) -> Dict[str, object]:
+        if len(rows) == 1:
+            return rows[0]
+
+        thresholds: List[int] = []
+        for i in range(len(rows) - 1):
+            expr = str(rows[i].get("range_expr") or "").strip()
+            if not expr:
+                raise ExpressionError(f"Missing range end expression for row {i + 1}")
+            thresholds.append(int(self.eval.eval(expr, env)))
+
+        if frame <= thresholds[0]:
+            return rows[0]
+        for i in range(1, len(rows) - 1):
+            if frame <= thresholds[i]:
+                return rows[i]
+        return rows[-1]
+
+    def _eval_optional(self, expr: str, env: Dict[str, float]) -> Optional[float]:
+        t = expr.strip()
+        if not t:
+            return None
+        return self.eval.eval(t, env)
+
+    def _now_utc_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _raytracer_binary_identity(self, path: Optional[Path] = None) -> Dict[str, object]:
+        path = path or self.cfg.raytracer_bin
+        info: Dict[str, object] = {"path": str(path)}
+        try:
+            st = path.stat()
+            info["size_bytes"] = int(st.st_size)
+            info["mtime_unix"] = float(st.st_mtime)
+        except Exception:
+            return info
+
+        try:
+            h = hashlib.sha256()
+            with path.open("rb") as f:
+                while True:
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            info["sha256"] = h.hexdigest()
+        except Exception:
+            pass
+        return info
+
+    def _write_manifest(self, manifest_path: Path, manifest: Dict[str, Any]) -> None:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        tmp.replace(manifest_path)
+
+    def _freeze_runtime_bundle(self, destination_dir: Path) -> tuple[Path, Optional[Path]]:
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        source_dir = self.cfg.raytracer_bin.parent
+        include_names = {"raytracer", "oidnDenoise"}
+        include_prefixes = ("libOpenImageDenoise", "libtbb")
+
+        for entry in source_dir.iterdir():
+            name = entry.name
+            if name in include_names or any(name.startswith(prefix) for prefix in include_prefixes):
+                dest = destination_dir / name
+                if entry.is_symlink():
+                    target = os.readlink(entry)
+                    if dest.exists() or dest.is_symlink():
+                        dest.unlink()
+                    os.symlink(target, dest)
+                elif entry.is_file():
+                    shutil.copy2(entry, dest)
+
+        frozen_binary = destination_dir / "raytracer"
+        if not frozen_binary.exists():
+            # Non-packaged/dev path may not have dependencies adjacent; at minimum keep the binary snapshot.
+            frozen_binary = destination_dir / "raytracer_snapshot"
+            shutil.copy2(self.cfg.raytracer_bin, frozen_binary)
+        frozen_binary.chmod(frozen_binary.stat().st_mode | 0o111)
+
+        frozen_oidn = destination_dir / "oidnDenoise"
+        if frozen_oidn.exists():
+            frozen_oidn.chmod(frozen_oidn.stat().st_mode | 0o111)
+            return frozen_binary, frozen_oidn
+        return frozen_binary, None
+
+    def run(self) -> None:
+        manifest_path: Optional[Path] = None
+        manifest: Dict[str, Any] = {}
+        run_start = time.time()
+        temp_cleanup_dir: Optional[Path] = None
+        frozen_binary_dir: Optional[Path] = None
+        try:
+            packaged_python_denoise = packaged_runtime() and self.cfg.denoise and can_run_oidn_postprocess()
+            init_env = self._evaluate_definitions(frame=0, fps=self.cfg.fps)
+            total_frames = int(self.eval.eval(self.cfg.total_frames_expr, init_env))
+            if total_frames <= 0:
+                raise ExpressionError("Total number of frames must be > 0")
+
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            base_name = f"video_{self.cfg.scene_name}_{stamp}"
+            video_path = self.cfg.output_dir / f"{base_name}.mp4"
+            manifest_path = self.cfg.output_dir / f"{base_name}.manifest.json"
+            if self.cfg.keep_frames:
+                frames_dir = self.cfg.output_dir / f"{base_name}_frames"
+                frames_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                frames_dir = Path(tempfile.mkdtemp(prefix="sr_rt_video_"))
+                temp_cleanup_dir = frames_dir
+
+            frozen_binary_dir = Path(tempfile.mkdtemp(prefix="sr_rt_bin_"))
+            frozen_binary, frozen_oidn = self._freeze_runtime_bundle(frozen_binary_dir)
+
+            suffix = "_denoised.ppm" if self.cfg.denoise else ".ppm"
+            frame_pattern = str(frames_dir / f"frame_%05d{suffix}")
+            manifest = {
+                "manifest_schema_version": 1,
+                "status": "started",
+                "started_utc": self._now_utc_iso(),
+                "scene": {
+                    "scene_name": self.cfg.scene_name,
+                    "palette": self.cfg.palette,
+                    "lighting_preset": self.cfg.lighting_preset,
+                },
+                "video": {
+                    "fps": self.cfg.fps,
+                    "total_frames": total_frames,
+                    "total_frames_expr": self.cfg.total_frames_expr,
+                },
+                "formulas": {
+                    "definitions": self.cfg.definitions,
+                    "camera_location_rows": self.cfg.location_rows,
+                    "camera_velocity_rows": self.cfg.velocity_rows,
+                    "camera_orientation_rows": self.cfg.orientation_rows,
+                },
+                "render_settings": {
+                    "width": self.cfg.width,
+                    "height": self.cfg.height,
+                    "spp": self.cfg.spp,
+                    "max_depth": self.cfg.max_depth,
+                    "adaptive": self.cfg.adaptive,
+                    "adaptive_threshold": self.cfg.adaptive_threshold,
+                    "denoise": self.cfg.denoise,
+                    "ppm_denoised_only": self.cfg.ppm_denoised_only,
+                    "atmosphere_enabled": self.cfg.atmosphere_enabled,
+                    "atmosphere_density": self.cfg.atmosphere_density,
+                    "atmosphere_color": self.cfg.atmosphere_color,
+                    "scatter_spacing_override": self.cfg.scatter_spacing_override,
+                    "scatter_max_radius_override": self.cfg.scatter_max_radius_override,
+                    "scatter_growth_scale_override": self.cfg.scatter_growth_scale_override,
+                    "big_scatter_spacing_override": self.cfg.big_scatter_spacing_override,
+                    "big_scatter_max_radius_override": self.cfg.big_scatter_max_radius_override,
+                    "row_scatter_xmax_override": self.cfg.row_scatter_xmax_override,
+                    "row_scatter_z_front_override": self.cfg.row_scatter_z_front_override,
+                    "row_scatter_z_back_override": self.cfg.row_scatter_z_back_override,
+                    "row_scatter_replacement_rate_override": self.cfg.row_scatter_replacement_rate_override,
+                    "keep_frames": self.cfg.keep_frames,
+                    "options_schema_version": self.cfg.options_schema_version,
+                    "scene_registry_schema_version": self.cfg.scene_registry_schema_version,
+                },
+                "outputs": {
+                    "video_path": str(video_path),
+                    "frames_dir": str(frames_dir),
+                    "frame_pattern": frame_pattern,
+                    "uses_temp_frames_dir": temp_cleanup_dir is not None,
+                    "manifest_path": str(manifest_path),
+                },
+                "raytracer_binary": {
+                    "source": self._raytracer_binary_identity(self.cfg.raytracer_bin),
+                    "frozen_for_job": self._raytracer_binary_identity(frozen_binary),
+                },
+                "progress": {
+                    "frames_rendered": 0,
+                    "frames_expected": total_frames,
+                },
+            }
+            self._write_manifest(manifest_path, manifest)
+
+            for frame in range(total_frames):
+                if self._is_abort():
+                    manifest["status"] = "aborted"
+                    manifest["ended_utc"] = self._now_utc_iso()
+                    manifest["duration_sec"] = time.time() - run_start
+                    manifest.setdefault("progress", {})["frames_rendered"] = frame
+                    if manifest_path is not None:
+                        self._write_manifest(manifest_path, manifest)
+                    return
+                while self._is_pause():
+                    if self._is_abort():
+                        manifest["status"] = "aborted"
+                        manifest["ended_utc"] = self._now_utc_iso()
+                        manifest["duration_sec"] = time.time() - run_start
+                        manifest.setdefault("progress", {})["frames_rendered"] = frame
+                        if manifest_path is not None:
+                            self._write_manifest(manifest_path, manifest)
+                        return
+                    time.sleep(0.1)
+
+                env = self._evaluate_definitions(frame, self.cfg.fps)
+                loc_row = self._select_row(self.cfg.location_rows, frame, env)
+                vel_row = self._select_row(self.cfg.velocity_rows, frame, env)
+                ori_row = self._select_row(self.cfg.orientation_rows, frame, env)
+
+                loc_fields = loc_row["fields"]
+                vel_fields = vel_row["fields"]
+                ori_fields = ori_row["fields"]
+
+                cam_x = self._eval_optional(str(loc_fields.get("x", "")), env)
+                cam_y = self._eval_optional(str(loc_fields.get("y", "")), env)
+                cam_z = self._eval_optional(str(loc_fields.get("z", "")), env)
+
+                vx = self._eval_optional(str(vel_fields.get("x", "")), env) or 0.0
+                vy = self._eval_optional(str(vel_fields.get("y", "")), env) or 0.0
+                vz = self._eval_optional(str(vel_fields.get("z", "")), env) or 0.0
+                beta, ab_yaw, ab_pitch = velocity_vector_to_turns(vx, vy, vz)
+
+                cam_pitch = self._eval_optional(str(ori_fields.get("pitch", "")), env) or 0.0
+                cam_yaw = self._eval_optional(str(ori_fields.get("yaw", "")), env) or 0.0
+
+                output_base = frames_dir / f"frame_{frame:05d}"
+                cmd = [
+                    str(frozen_binary),
+                    "--scene",
+                    self.cfg.scene_name,
+                    "--output-base",
+                    str(output_base),
+                    "--width",
+                    str(self.cfg.width),
+                    "--height",
+                    str(self.cfg.height),
+                    "--spp",
+                    str(self.cfg.spp),
+                    "--max-depth",
+                    str(self.cfg.max_depth),
+                    "--adaptive",
+                    "1" if self.cfg.adaptive else "0",
+                    "--adaptive-threshold",
+                    float_text(self.cfg.adaptive_threshold),
+                    "--denoise",
+                    "0" if packaged_python_denoise else ("1" if self.cfg.denoise else "0"),
+                    "--lighting-preset",
+                    self.cfg.lighting_preset,
+                    "--ppm-denoised-only",
+                    "0" if packaged_python_denoise else ("1" if self.cfg.ppm_denoised_only else "0"),
+                    "--atmosphere",
+                    "1" if self.cfg.atmosphere_enabled else "0",
+                    "--atmosphere-density",
+                    float_text(self.cfg.atmosphere_density),
+                    "--atmosphere-color",
+                    self.cfg.atmosphere_color,
+                    "--aberration-speed",
+                    float_text(beta),
+                    "--aberration-yaw-turns",
+                    float_text(ab_yaw),
+                    "--aberration-pitch-turns",
+                    float_text(ab_pitch),
+                    "--cam-yaw-turns",
+                    float_text(cam_yaw),
+                    "--cam-pitch-turns",
+                    float_text(cam_pitch),
+                ]
+                if self.cfg.scene_name.startswith("big_scatter"):
+                    cmd += ["--big-scatter-palette", self.cfg.palette]
+                if self.cfg.scatter_spacing_override is not None:
+                    cmd += ["--scatter-spacing", float_text(self.cfg.scatter_spacing_override)]
+                if self.cfg.scatter_max_radius_override is not None:
+                    cmd += ["--scatter-max-radius", float_text(self.cfg.scatter_max_radius_override)]
+                if self.cfg.scatter_growth_scale_override is not None:
+                    cmd += ["--scatter-growth-scale", float_text(self.cfg.scatter_growth_scale_override)]
+                if self.cfg.big_scatter_spacing_override is not None:
+                    cmd += ["--big-scatter-spacing", float_text(self.cfg.big_scatter_spacing_override)]
+                if self.cfg.big_scatter_max_radius_override is not None:
+                    cmd += ["--big-scatter-max-radius", float_text(self.cfg.big_scatter_max_radius_override)]
+                if self.cfg.row_scatter_xmax_override is not None:
+                    cmd += ["--row-scatter-xmax", float_text(self.cfg.row_scatter_xmax_override)]
+                if self.cfg.row_scatter_z_front_override is not None:
+                    cmd += ["--row-scatter-z-front", float_text(self.cfg.row_scatter_z_front_override)]
+                if self.cfg.row_scatter_z_back_override is not None:
+                    cmd += ["--row-scatter-z-back", float_text(self.cfg.row_scatter_z_back_override)]
+                if self.cfg.row_scatter_replacement_rate_override is not None:
+                    cmd += ["--row-scatter-replacement-rate", float_text(self.cfg.row_scatter_replacement_rate_override)]
+                if cam_x is not None:
+                    cmd += ["--cam-x", float_text(cam_x)]
+                if cam_y is not None:
+                    cmd += ["--cam-y", float_text(cam_y)]
+                if cam_z is not None:
+                    cmd += ["--cam-z", float_text(cam_z)]
+
+                frame_env = os.environ.copy()
+                frame_env["DYLD_LIBRARY_PATH"] = str(frozen_binary_dir)
+                if frozen_oidn is not None:
+                    frame_env["SR_RT_OIDN_DENOISE_BIN"] = str(frozen_oidn)
+
+                proc = subprocess.run(cmd, capture_output=True, text=True, env=frame_env)
+                if proc.returncode != 0:
+                    raise RuntimeError(f"Frame {frame} failed.\nCommand: {' '.join(cmd)}\n{proc.stderr[-800:]}")
+
+                if packaged_python_denoise:
+                    ok, denoise_msg, _ = run_oidn_postprocess(output_base)
+                    if not ok:
+                        raise RuntimeError(f"Frame {frame} denoise failed.\n{denoise_msg}")
+
+                manifest.setdefault("progress", {})["frames_rendered"] = frame + 1
+                if manifest_path is not None and ((frame + 1) % 25 == 0 or frame + 1 == total_frames):
+                    self._write_manifest(manifest_path, manifest)
+
+                self.progress.emit(frame + 1, total_frames, f"Rendered frame {frame + 1}/{total_frames}")
+
+            env_ffmpeg = os.environ.get("SR_RT_FFMPEG_BIN", "").strip()
+            ffmpeg = env_ffmpeg if env_ffmpeg and Path(env_ffmpeg).exists() else shutil.which("ffmpeg")
+            if not ffmpeg:
+                for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+                    if Path(candidate).exists():
+                        ffmpeg = candidate
+                        break
+            if not ffmpeg:
+                raise RuntimeError("ffmpeg not found. Install ffmpeg or add it to PATH.")
+
+            enc_cmd = [
+                ffmpeg,
+                "-y",
+                "-framerate",
+                str(self.cfg.fps),
+                "-i",
+                frame_pattern,
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(video_path),
+            ]
+            enc = subprocess.run(enc_cmd, capture_output=True, text=True)
+            if enc.returncode != 0:
+                raise RuntimeError(f"ffmpeg encode failed:\n{enc.stderr[-1200:]}")
+
+            manifest["status"] = "completed"
+            manifest["ended_utc"] = self._now_utc_iso()
+            manifest["duration_sec"] = time.time() - run_start
+            manifest.setdefault("progress", {})["frames_rendered"] = total_frames
+            manifest["ffmpeg"] = {"path": ffmpeg, "command": enc_cmd}
+            try:
+                manifest.setdefault("outputs", {})["video_size_bytes"] = int(video_path.stat().st_size)
+            except Exception:
+                pass
+            if manifest_path is not None:
+                self._write_manifest(manifest_path, manifest)
+
+            self.done.emit(str(video_path))
+        except Exception as exc:
+            manifest["status"] = "failed"
+            manifest["ended_utc"] = self._now_utc_iso()
+            manifest["duration_sec"] = time.time() - run_start
+            manifest["error"] = str(exc)
+            if manifest_path is not None:
+                try:
+                    self._write_manifest(manifest_path, manifest)
+                except Exception:
+                    pass
+            self.failed.emit(str(exc))
+        finally:
+            if temp_cleanup_dir is not None and temp_cleanup_dir.exists():
+                shutil.rmtree(temp_cleanup_dir, ignore_errors=True)
+            if frozen_binary_dir is not None and frozen_binary_dir.exists():
+                shutil.rmtree(frozen_binary_dir, ignore_errors=True)

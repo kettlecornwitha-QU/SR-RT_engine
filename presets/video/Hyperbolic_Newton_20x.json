@@ -1,0 +1,71 @@
+{
+  "preset_schema_version": 2,
+  "options_schema_version": 1,
+  "scene_base": "row_scatter",
+  "scene_name": "row_scatter",
+  "palette": "balanced",
+  "fps": "30",
+  "total_frames": "int(fps*total_time/20)",
+  "definitions": [
+    "start = 76",
+    "end = -150",
+    "distance = abs(end - start)",
+    "total_time = sqrt(distance*(distance + 4))",
+    "halfway = 0.5*total_time"
+  ],
+  "camera_location": {
+    "rows": [
+      {
+        "fields": {
+          "x": "0",
+          "y": "1.2",
+          "z": "start - sqrt((20*time)^2 + 1) + 1"
+        },
+        "range_text": "int(fps*halfway)"
+      },
+      {
+        "fields": {
+          "x": "0",
+          "y": "1.2",
+          "z": "sqrt((20*time - total_time)^2 + 1) + 1 - sqrt(distance*(distance + 4) + 1) + start"
+        },
+        "range_text": ""
+      }
+    ]
+  },
+  "camera_velocity": {
+    "rows": [
+      {
+        "fields": {
+          "x": "0",
+          "y": "0",
+          "z": "0"
+        },
+        "range_text": "int(fps*halfway)"
+      }
+    ]
+  },
+  "camera_orientation": {
+    "rows": [
+      {
+        "fields": {
+          "pitch": "0",
+          "yaw": "0"
+        },
+        "range_text": ""
+      }
+    ]
+  },
+  "settings": {
+    "width": 1920,
+    "height": 1080,
+    "spp": 64,
+    "max_depth": 5,
+    "adaptive": true,
+    "adaptive_threshold": "0.01",
+    "denoise": true,
+    "lighting_preset": "cornell-ceiling-plus-key",
+    "keep_frames": false
+  },
+  "preset_name": "Hyperbolic Newton 20x"
+}

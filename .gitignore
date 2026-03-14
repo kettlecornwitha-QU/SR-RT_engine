@@ -1,0 +1,38 @@
+# macOS / Finder
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Local virtualenvs / tooling
+.venv/
+venv/
+
+# CMake / native build output
+/build/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# Packaged app output
+/dist_apps/
+
+# Local renderer binaries
+/raytracer
+/raytracer_no_oidn
+
+# Local render outputs and user presets
+/outputs/
+
+# Temporary / generated GUI launch artifacts
+*.tmp
+
+# Archives / checksums from local packaging
+*.zip
+SHA256SUMS.txt

@@ -1,0 +1,75 @@
+name: Build macOS Apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-macos-apps:
+    name: Package Image/Video Renderer Apps
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          brew install cmake ffmpeg
+
+      - name: Install GUI packaging dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements-gui.txt
+
+      - name: Download OpenImageDenoise
+        run: |
+          mkdir -p "$HOME/deps"
+          cd "$HOME/deps"
+          curl -L -o oidn-2.4.1.arm64.macos.tar.gz \
+            https://github.com/OpenImageDenoise/oidn/releases/download/v2.4.1/oidn-2.4.1.arm64.macos.tar.gz
+          tar -xzf oidn-2.4.1.arm64.macos.tar.gz
+
+      - name: Configure raytracer build
+        run: |
+          cmake -S . -B build \
+            -DOpenImageDenoise_DIR="$HOME/deps/oidn-2.4.1.arm64.macos/lib/cmake/OpenImageDenoise"
+
+      - name: Build raytracer
+        run: cmake --build build -j
+
+      - name: Package standalone apps
+        run: ./package_standalone_apps.command
+
+      - name: Create zipped app artifacts
+        run: |
+          mkdir -p release_artifacts
+          ditto -c -k --keepParent "dist_apps/Image Renderer.app" "release_artifacts/Image Renderer.app.zip"
+          ditto -c -k --keepParent "dist_apps/Video Renderer.app" "release_artifacts/Video Renderer.app.zip"
+          shasum -a 256 \
+            "release_artifacts/Image Renderer.app.zip" \
+            "release_artifacts/Video Renderer.app.zip" \
+            > "release_artifacts/SHA256SUMS.txt"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-renderer-apps
+          path: release_artifacts/*
+
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release_artifacts/Image Renderer.app.zip
+            release_artifacts/Video Renderer.app.zip
+            release_artifacts/SHA256SUMS.txt
