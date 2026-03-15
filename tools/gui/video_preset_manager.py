@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Dict
 
+from gui_runtime import outputs_dir
+
 
 def _float_text(v: float) -> str:
     return f"{v:.10g}"
@@ -19,12 +21,29 @@ class VideoPresetManager:
         self.project_root = project_root
         self.options_schema = options_schema
 
+    def bundled_preset_dir(self) -> Path:
+        return self.project_root / "presets" / "video"
+
+    def user_preset_dir(self) -> Path:
+        return outputs_dir(self.project_root).parent / "presets" / "video"
+
     def legacy_preset_dir(self) -> Path:
         return self.project_root / "outputs" / "video_presets"
 
     def preset_dir(self) -> Path:
-        path = self.project_root / "presets" / "video"
+        path = self.user_preset_dir()
         path.mkdir(parents=True, exist_ok=True)
+
+        bundled = self.bundled_preset_dir()
+        if bundled.exists() and bundled.is_dir() and bundled.resolve() != path.resolve():
+            for bundled_file in bundled.glob("*.json"):
+                dest = path / bundled_file.name
+                if not dest.exists():
+                    try:
+                        shutil.copy2(bundled_file, dest)
+                    except Exception:
+                        pass
+
         legacy = self.legacy_preset_dir()
         if legacy.exists() and legacy.is_dir():
             for legacy_file in legacy.glob("*.json"):

@@ -212,6 +212,7 @@ make_pyinstaller_args() {
   local app_name="$1"
   local entrypoint="$2"
   local icon_path="$3"
+  local include_video_presets="${4:-0}"
 
   local -a args=(
     -m PyInstaller
@@ -229,6 +230,10 @@ make_pyinstaller_args() {
 
   if [[ -f "$icon_path" ]]; then
     args+=(--icon "$icon_path")
+  fi
+
+  if [[ "$include_video_presets" == "1" && -d "$project_dir/presets/video" ]]; then
+    args+=(--add-data "$project_dir/presets/video:presets/video")
   fi
 
   args+=("$entrypoint")
@@ -261,7 +266,7 @@ video_icon="$(find_existing_app_icon "Video Renderer" "video_renderer.icns")"
 image_args=("${(@f)$(make_pyinstaller_args "Image Renderer" "$project_dir/tools/gui/image_app_entry.py" "$image_icon")}")
 append_oidn_binaries image_args "$oidn_lib_dir" "$oidn_bin_dir"
 
-video_args=("${(@f)$(make_pyinstaller_args "Video Renderer" "$project_dir/tools/gui/video_app_entry.py" "$video_icon")}")
+video_args=("${(@f)$(make_pyinstaller_args "Video Renderer" "$project_dir/tools/gui/video_app_entry.py" "$video_icon" "1")}")
 append_oidn_binaries video_args "$oidn_lib_dir" "$oidn_bin_dir"
 if [[ -n "$ffmpeg_bin" ]]; then
   video_args+=(--add-binary "$ffmpeg_bin:bin")
