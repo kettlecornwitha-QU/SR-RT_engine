@@ -35,10 +35,16 @@ class RenderWorker(QThread):
         self._pause = False
         self._lock = threading.Lock()
         self.eval = ExpressionEvaluator()
+        self._current_render_proc: Optional[subprocess.Popen[str]] = None
+        self._current_encoder_proc: Optional[subprocess.Popen[bytes]] = None
 
     def request_abort(self) -> None:
         with self._lock:
             self._abort = True
+            render_proc = self._current_render_proc
+            encoder_proc = self._current_encoder_proc
+        self._terminate_process(render_proc)
+        self._terminate_encoder(encoder_proc)
 
     def request_pause(self, pause: bool) -> None:
         with self._lock:
@@ -272,6 +278,19 @@ class RenderWorker(QThread):
                 except Exception:
                     pass
 
+    def _terminate_process(self, proc: Optional[subprocess.Popen[str]]) -> None:
+        if proc is None:
+            return
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
     def run(self) -> None:
         manifest_path: Optional[Path] = None
         manifest: Dict[str, Any] = {}
@@ -302,6 +321,7 @@ class RenderWorker(QThread):
             frozen_binary, frozen_oidn = self._freeze_runtime_bundle(frozen_binary_dir)
             ffmpeg = self._find_ffmpeg()
             encoder = self._start_streaming_encoder(ffmpeg, video_path)
+            self._current_encoder_proc = encoder
 
             manifest = {
                 "manifest_schema_version": 1,
@@ -429,8 +449,6 @@ class RenderWorker(QThread):
                     float_text(self.cfg.adaptive_threshold),
                     "--denoise",
                     "0" if packaged_python_denoise else ("1" if self.cfg.denoise else "0"),
-                    "--lighting-preset",
-                    self.cfg.lighting_preset,
                     "--ppm-denoised-only",
                     "0" if packaged_python_denoise else ("1" if self.cfg.ppm_denoised_only else "0"),
                     "--atmosphere",
@@ -450,6 +468,8 @@ class RenderWorker(QThread):
                     "--cam-pitch-turns",
                     float_text(cam_pitch),
                 ]
+                if self.cfg.supports_lighting_preset:
+                    cmd += ["--lighting-preset", self.cfg.lighting_preset]
                 if self.cfg.scene_name.startswith("big_scatter"):
                     cmd += ["--big-scatter-palette", self.cfg.palette]
                 if self.cfg.scatter_spacing_override is not None:
@@ -482,9 +502,29 @@ class RenderWorker(QThread):
                 if frozen_oidn is not None:
                     frame_env["SR_RT_OIDN_DENOISE_BIN"] = str(frozen_oidn)
 
-                proc = subprocess.run(cmd, capture_output=True, text=True, env=frame_env)
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=frame_env,
+                )
+                self._current_render_proc = proc
+                stdout_text, stderr_text = proc.communicate()
+                self._current_render_proc = None
+
+                if self._is_abort():
+                    manifest["status"] = "aborted"
+                    manifest["ended_utc"] = self._now_utc_iso()
+                    manifest["duration_sec"] = time.time() - run_start
+                    manifest.setdefault("progress", {})["frames_rendered"] = frame
+                    if manifest_path is not None:
+                        self._write_manifest(manifest_path, manifest)
+                    return
+
                 if proc.returncode != 0:
-                    raise RuntimeError(f"Frame {frame} failed.\nCommand: {' '.join(cmd)}\n{proc.stderr[-800:]}")
+                    err_tail = (stderr_text or stdout_text or "")[-800:]
+                    raise RuntimeError(f"Frame {frame} failed.\nCommand: {' '.join(cmd)}\n{err_tail}")
 
                 if packaged_python_denoise:
                     ok, denoise_msg, _ = run_oidn_postprocess(output_base)
@@ -537,6 +577,8 @@ class RenderWorker(QThread):
                     pass
             self.failed.emit(str(exc))
         finally:
+            self._current_render_proc = None
+            self._current_encoder_proc = None
             self._terminate_encoder(encoder)
             if temp_work_dir is not None and temp_work_dir.exists():
                 shutil.rmtree(temp_work_dir, ignore_errors=True)

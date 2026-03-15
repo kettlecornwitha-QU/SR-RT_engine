@@ -10,6 +10,7 @@ from typing import List
 @dataclass
 class GuiOptionsSchema:
     schema_version: int = 1
+    supports_lighting_preset: bool = False
     width: int = 1920
     height: int = 1080
     spp: int = 128
@@ -117,6 +118,7 @@ def load_gui_options_schema(raytracer_bin: Path) -> GuiOptionsSchema:
         lighting_choices = choices.get("lighting_preset")
         if isinstance(lighting_choices, list) and lighting_choices:
             schema.lighting_preset_choices = [str(x) for x in lighting_choices]
+            schema.supports_lighting_preset = True
         fps_choices = choices.get("video_fps")
         if isinstance(fps_choices, list) and fps_choices:
             schema.video_fps_choices = [int(x) for x in fps_choices]

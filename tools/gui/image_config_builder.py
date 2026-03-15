@@ -28,6 +28,7 @@ class ImageRenderConfig:
     cam_yaw_turns: float
     cam_pitch_turns: float
     lighting_preset: str
+    supports_lighting_preset: bool
     denoise: bool
     ppm_denoised_only: bool
     atmosphere_enabled: bool
@@ -152,6 +153,7 @@ def build_image_render_config(
         cam_yaw_turns=safe_float(cam_yaw, 0.0),
         cam_pitch_turns=safe_float(cam_pitch, 0.0),
         lighting_preset=settings_dialog.lighting_preset_combo.currentText(),
+        supports_lighting_preset=bool(options_schema.supports_lighting_preset),
         denoise=settings_dialog.denoise_check.isChecked(),
         ppm_denoised_only=settings_dialog.ppm_denoised_only.isChecked(),
         atmosphere_enabled=settings_dialog.atmosphere_check.isChecked(),
@@ -238,8 +240,6 @@ def build_image_cli_args(config: ImageRenderConfig, output_base: Path) -> List[s
         float_text(config.cam_yaw_turns),
         "--cam-pitch-turns",
         float_text(config.cam_pitch_turns),
-        "--lighting-preset",
-        config.lighting_preset,
         "--denoise",
         "1" if config.denoise else "0",
         "--ppm-denoised-only",
@@ -251,6 +251,9 @@ def build_image_cli_args(config: ImageRenderConfig, output_base: Path) -> List[s
         "--atmosphere-color",
         config.atmosphere_color,
     ]
+
+    if config.supports_lighting_preset:
+        args += ["--lighting-preset", config.lighting_preset]
 
     if config.cam_x is not None:
         args += ["--cam-x", float_text(config.cam_x)]

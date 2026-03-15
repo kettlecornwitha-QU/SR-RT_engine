@@ -77,6 +77,9 @@ class RenderSettingsDialog(QDialog):
         lighting_idx = self.lighting_preset_combo.findText(schema.lighting_preset_default)
         if lighting_idx >= 0:
             self.lighting_preset_combo.setCurrentIndex(lighting_idx)
+        if not schema.supports_lighting_preset:
+            self.lighting_preset_combo.setEnabled(False)
+            self.lighting_preset_combo.setToolTip("This renderer binary does not advertise lighting preset support.")
 
         self.ppm_denoised_only = QCheckBox("Only write denoised PPM")
         self.ppm_denoised_only.setChecked(schema.ppm_denoised_only)

@@ -27,6 +27,7 @@ class RenderTaskConfig:
     denoise: bool
     ppm_denoised_only: bool
     lighting_preset: str
+    supports_lighting_preset: bool
     atmosphere_enabled: bool
     atmosphere_density: float
     atmosphere_color: str
@@ -108,6 +109,7 @@ def build_render_task_config(
         denoise=settings_dialog.denoise.isChecked(),
         ppm_denoised_only=settings_dialog.ppm_denoised_only.isChecked(),
         lighting_preset=settings_dialog.lighting_preset.currentText(),
+        supports_lighting_preset=bool(options_schema.supports_lighting_preset),
         atmosphere_enabled=settings_dialog.atmosphere_check.isChecked(),
         atmosphere_density=atmosphere_density,
         atmosphere_color=atmosphere_color,
