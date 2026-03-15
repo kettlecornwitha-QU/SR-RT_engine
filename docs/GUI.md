@@ -34,6 +34,7 @@ Left panel:
   - camera orientation: `yaw turns`, `pitch turns`
 - `Settings...`: opens the render settings dialog
 - `Render`: starts a still-image render
+- `Save`: appears after a successful render and writes the current result to `outputs/` as a `.png`
 
 Right panel:
 - rendered image preview
@@ -70,6 +71,11 @@ Packaged app runtime:
 The GUI displays:
 - the denoised image if a denoised output exists
 - otherwise the base `.ppm`
+
+When the `Save` button is used:
+- the saved file is written as a `.png`
+- it is saved under the outputs directory
+- it keeps the full rendered resolution, not the scaled-to-fit preview size
 
 ### Denoising in packaged apps
 
