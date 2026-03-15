@@ -57,6 +57,7 @@ class VideoJobRunner:
             "fps": float(fps),
             "time": float(frame) / float(fps),
         }
+        pending: Dict[str, str] = {}
         for line in self.cfg.definitions:
             if "=" not in line:
                 continue
@@ -67,7 +68,29 @@ class VideoJobRunner:
                 continue
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
                 raise ExpressionError(f"Invalid definition name: {name}")
-            env[name] = self.eval.eval(expr, env)
+            if name in pending:
+                raise ExpressionError(f"Duplicate definition name: {name}")
+            pending[name] = expr
+
+        constant_names = self.eval.constant_names()
+        while pending:
+            progress = False
+            pending_names = set(pending.keys())
+            for name, expr in list(pending.items()):
+                refs = self.eval.referenced_symbols(expr)
+                unknown = refs - set(env.keys()) - pending_names - constant_names
+                if unknown:
+                    raise ExpressionError(f"Unknown symbol: {sorted(unknown)[0]}")
+                unresolved_refs = refs & pending_names
+                if unresolved_refs:
+                    continue
+                env[name] = self.eval.eval(expr, env)
+                del pending[name]
+                progress = True
+
+            if not progress:
+                cycle = ", ".join(sorted(pending.keys()))
+                raise ExpressionError(f"Circular or unresolved definition dependency among: {cycle}")
         return env
 
     def _select_row(self, rows: List[Dict[str, object]], frame: int, env: Dict[str, float]) -> Dict[str, object]:

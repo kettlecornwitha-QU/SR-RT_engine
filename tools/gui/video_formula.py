@@ -4,7 +4,7 @@ from __future__ import annotations
 import ast
 import math
 import re
-from typing import Dict, Tuple
+from typing import Dict, Set, Tuple
 
 
 def float_text(v: float) -> str:
@@ -53,6 +53,35 @@ class ExpressionEvaluator:
             "max": max,
         }
         self._consts = {"pi": math.pi, "e": math.e}
+
+    def constant_names(self) -> Set[str]:
+        return set(self._consts.keys())
+
+    def referenced_symbols(self, expr: str) -> Set[str]:
+        src = self.sanitize(expr)
+        if not src:
+            return set()
+        try:
+            tree = ast.parse(src, mode="eval")
+        except SyntaxError as exc:
+            raise ExpressionError(f"Syntax error: {exc}") from exc
+        names: Set[str] = set()
+
+        def visit(node: ast.AST) -> None:
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+                return
+            if isinstance(node, ast.Call):
+                for arg in node.args:
+                    visit(arg)
+                for keyword in node.keywords:
+                    visit(keyword.value)
+                return
+            for child in ast.iter_child_nodes(node):
+                visit(child)
+
+        visit(tree.body)
+        return {name for name in names if name not in self._consts}
 
     def sanitize(self, expr: str) -> str:
         s = expr.strip()
