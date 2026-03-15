@@ -22,6 +22,8 @@ Makefile
 
 # Packaged app output
 /dist_apps/
+/Image Renderer.app/
+/Video Renderer.app/
 
 # Local renderer binaries
 /raytracer
