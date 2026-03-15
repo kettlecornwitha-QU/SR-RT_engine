@@ -38,6 +38,7 @@ from gui_constants import (
 from gui_runtime import (
     gui_temp_output_dir,
     new_image_output_base,
+    outputs_dir,
     packaged_runtime,
     pick_output_image,
     project_root_path,
@@ -69,6 +70,7 @@ class RaytracerGui(QMainWindow):
         self.render_start = 0.0
         self.latest_pixmap: QPixmap | None = None
         self.current_output_base: Path | None = None
+        self.last_rendered_scene_name: str | None = None
         self.temp_output_dir = gui_temp_output_dir("sr_rt_gui")
         self.stdout_buffer = ""
         self.last_progress_text = ""
@@ -169,8 +171,13 @@ class RaytracerGui(QMainWindow):
         self.render_button = QPushButton("Render")
         style_button(self.render_button, primary=True)
         self.render_button.clicked.connect(self._on_render_clicked)
+        self.save_button = QPushButton("Save")
+        style_button(self.save_button, primary=False)
+        self.save_button.clicked.connect(self._on_save_clicked)
+        self.save_button.hide()
         button_row.addWidget(self.settings_button)
         button_row.addWidget(self.render_button)
+        button_row.addWidget(self.save_button)
         controls.addLayout(button_row)
 
         self.status_label = QLabel(STATUS_IDLE)
@@ -225,6 +232,7 @@ class RaytracerGui(QMainWindow):
 
     def _build_config(self):
         scene = self.variant_combo.currentData() or str(self.scene_combo.currentData() or self.scene_combo.currentText())
+        self.last_rendered_scene_name = str(scene)
         config = build_image_render_config(
             scene_name=str(scene),
             big_scatter_palette=self.big_scatter_palette_combo.currentText(),
@@ -264,7 +272,32 @@ class RaytracerGui(QMainWindow):
             self.status_label.setText(f"Render finished, but failed to load image: {image_path}")
             return
         self.latest_pixmap = pix
+        self.save_button.show()
         self._refresh_display_pixmap()
+
+    def _save_output_path(self) -> Path:
+        scene_name = self.last_rendered_scene_name or "render"
+        safe_scene_name = re.sub(r"[^A-Za-z0-9._-]+", "_", scene_name).strip("_") or "render"
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        output_dir = outputs_dir(self.project_root)
+        candidate = output_dir / f"{safe_scene_name}_{timestamp}.png"
+        suffix = 1
+        while candidate.exists():
+            candidate = output_dir / f"{safe_scene_name}_{timestamp}_{suffix}.png"
+            suffix += 1
+        return candidate
+
+    def _on_save_clicked(self) -> None:
+        if self.latest_pixmap is None or self.latest_pixmap.isNull():
+            QMessageBox.warning(self, "Nothing To Save", "Render an image first.")
+            return
+
+        output_path = self._save_output_path()
+        if not self.latest_pixmap.save(str(output_path), "PNG"):
+            QMessageBox.warning(self, "Save Failed", f"Could not save PNG to:\n{output_path}")
+            return
+
+        self.status_label.setText(f"Saved PNG to {output_path}")
 
     def _refresh_display_pixmap(self) -> None:
         if self.latest_pixmap is None:
@@ -301,6 +334,7 @@ class RaytracerGui(QMainWindow):
             return
 
         self.current_output_base = new_image_output_base(self.temp_output_dir)
+        self.save_button.hide()
 
         config = self._build_config()
         args = build_image_cli_args(config, self.current_output_base)
