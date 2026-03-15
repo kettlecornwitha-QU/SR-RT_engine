@@ -96,6 +96,41 @@ add_binary_if_exists() {
   fi
 }
 
+require_renderer_binary() {
+  if [[ ! -x "$project_dir/build/raytracer" ]]; then
+    echo "Missing build/raytracer. Build the renderer first."
+    echo "Try: cmake --build build -j"
+    exit 1
+  fi
+}
+
+require_python_packaging_deps() {
+  local python_bin="$1"
+  if ! "$python_bin" -c "import PyInstaller" >/dev/null 2>&1; then
+    echo "PyInstaller is not installed for $python_bin"
+    echo "Install GUI packaging deps with:"
+    echo "  $python_bin -m pip install -r requirements-gui.txt"
+    exit 1
+  fi
+
+  if ! "$python_bin" -c "import PySide6" >/dev/null 2>&1; then
+    echo "PySide6 is not installed for $python_bin"
+    echo "Install GUI packaging deps with:"
+    echo "  $python_bin -m pip install -r requirements-gui.txt"
+    exit 1
+  fi
+}
+
+cleanup_dist_outputs() {
+  mkdir -p "$dist_dir" "$build_dir"
+  rm -rf \
+    "$dist_dir/.DS_Store" \
+    "$dist_dir/Image Renderer.app" \
+    "$dist_dir/Video Renderer.app" \
+    "$dist_dir/Image Renderer" \
+    "$dist_dir/Video Renderer"
+}
+
 patch_bundled_raytracer_rpaths() {
   local app_dir="$1"
   local bin_dir
@@ -137,138 +172,117 @@ sign_app_bundle() {
   codesign --force --deep --sign - "$app_dir"
 }
 
+finalize_app_bundle() {
+  local app_dir="$1"
+  ensure_oidn_symlinks "$app_dir"
+  patch_bundled_raytracer_rpaths "$app_dir"
+  sign_app_bundle "$app_dir"
+}
+
+prune_post_build_artifacts() {
+  rm -rf \
+    "$dist_dir/.DS_Store" \
+    "$dist_dir/Image Renderer" \
+    "$dist_dir/Video Renderer"
+}
+
+append_oidn_binaries() {
+  local array_name="$1"
+  local oidn_lib_dir="$2"
+  local oidn_bin_dir="$3"
+
+  if [[ -n "$oidn_lib_dir" ]]; then
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libOpenImageDenoise.2.4.1.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libOpenImageDenoise.2.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libOpenImageDenoise.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libOpenImageDenoise_core.2.4.1.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libOpenImageDenoise_device_cpu.2.4.1.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libOpenImageDenoise_device_metal.2.4.1.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libtbb.12.17.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libtbb.12.dylib" "bin"
+    add_binary_if_exists "$array_name" "$oidn_lib_dir/libtbb.dylib" "bin"
+  fi
+
+  if [[ -n "$oidn_bin_dir" ]]; then
+    add_binary_if_exists "$array_name" "$oidn_bin_dir/oidnDenoise" "bin"
+  fi
+}
+
+make_pyinstaller_args() {
+  local app_name="$1"
+  local entrypoint="$2"
+  local icon_path="$3"
+
+  local -a args=(
+    -m PyInstaller
+    --noconfirm
+    --clean
+    --windowed
+    --onedir
+    --name "$app_name"
+    --distpath "$dist_dir"
+    --workpath "$build_dir"
+    --specpath "$build_dir"
+    --paths "$project_dir/tools/gui"
+    --add-binary "$project_dir/build/raytracer:bin"
+  )
+
+  if [[ -f "$icon_path" ]]; then
+    args+=(--icon "$icon_path")
+  fi
+
+  args+=("$entrypoint")
+  printf '%s\n' "${args[@]}"
+}
+
+find_existing_app_icon() {
+  local app_name="$1"
+  local icon_file="$2"
+  local dist_icon="$dist_dir/$app_name.app/Contents/Resources/$icon_file"
+  if [[ -f "$dist_icon" ]]; then
+    echo "$dist_icon"
+    return
+  fi
+  echo ""
+}
+
 python_bin="$(find_python)"
 oidn_lib_dir="$(find_oidn_lib_dir || true)"
 oidn_bin_dir="$(find_oidn_bin_dir || true)"
-
-if [[ ! -x "$project_dir/build/raytracer" ]]; then
-  echo "Missing build/raytracer. Build the renderer first."
-  echo "Try: cmake --build build -j"
-  exit 1
-fi
-
-if ! "$python_bin" -c "import PyInstaller" >/dev/null 2>&1; then
-  echo "PyInstaller is not installed for $python_bin"
-  echo "Install GUI packaging deps with:"
-  echo "  $python_bin -m pip install -r requirements-gui.txt"
-  exit 1
-fi
-
-if ! "$python_bin" -c "import PySide6" >/dev/null 2>&1; then
-  echo "PySide6 is not installed for $python_bin"
-  echo "Install GUI packaging deps with:"
-  echo "  $python_bin -m pip install -r requirements-gui.txt"
-  exit 1
-fi
-
-mkdir -p "$dist_dir" "$build_dir"
-rm -rf \
-  "$dist_dir/.DS_Store" \
-  "$dist_dir/Image Renderer.app" \
-  "$dist_dir/Video Renderer.app" \
-  "$dist_dir/Image Renderer" \
-  "$dist_dir/Video Renderer"
-
-image_icon="$project_dir/Image Renderer.app/Contents/Resources/image_renderer.icns"
-video_icon="$project_dir/Video Renderer.app/Contents/Resources/video_renderer.icns"
 ffmpeg_bin="$(find_ffmpeg)"
 
-image_args=(
-  -m PyInstaller
-  --noconfirm
-  --clean
-  --windowed
-  --onedir
-  --name "Image Renderer"
-  --distpath "$dist_dir"
-  --workpath "$build_dir"
-  --specpath "$build_dir"
-  --paths "$project_dir/tools/gui"
-  --add-binary "$project_dir/build/raytracer:bin"
-)
+require_renderer_binary
+require_python_packaging_deps "$python_bin"
+cleanup_dist_outputs
 
-if [[ -n "$oidn_lib_dir" ]]; then
-  add_binary_if_exists image_args "$oidn_lib_dir/libOpenImageDenoise.2.4.1.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libOpenImageDenoise.2.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libOpenImageDenoise.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libOpenImageDenoise_core.2.4.1.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libOpenImageDenoise_device_cpu.2.4.1.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libOpenImageDenoise_device_metal.2.4.1.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libtbb.12.17.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libtbb.12.dylib" "bin"
-  add_binary_if_exists image_args "$oidn_lib_dir/libtbb.dylib" "bin"
-fi
-if [[ -n "$oidn_bin_dir" ]]; then
-  add_binary_if_exists image_args "$oidn_bin_dir/oidnDenoise" "bin"
-fi
+image_icon="$(find_existing_app_icon "Image Renderer" "image_renderer.icns")"
+video_icon="$(find_existing_app_icon "Video Renderer" "video_renderer.icns")"
 
-if [[ -f "$image_icon" ]]; then
-  image_args+=(--icon "$image_icon")
-fi
+image_args=("${(@f)$(make_pyinstaller_args "Image Renderer" "$project_dir/tools/gui/image_app_entry.py" "$image_icon")}")
+append_oidn_binaries image_args "$oidn_lib_dir" "$oidn_bin_dir"
 
-image_args+=("$project_dir/tools/gui/image_app_entry.py")
-
-video_args=(
-  -m PyInstaller
-  --noconfirm
-  --clean
-  --windowed
-  --onedir
-  --name "Video Renderer"
-  --distpath "$dist_dir"
-  --workpath "$build_dir"
-  --specpath "$build_dir"
-  --paths "$project_dir/tools/gui"
-  --add-binary "$project_dir/build/raytracer:bin"
-)
-
-if [[ -n "$oidn_lib_dir" ]]; then
-  add_binary_if_exists video_args "$oidn_lib_dir/libOpenImageDenoise.2.4.1.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libOpenImageDenoise.2.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libOpenImageDenoise.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libOpenImageDenoise_core.2.4.1.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libOpenImageDenoise_device_cpu.2.4.1.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libOpenImageDenoise_device_metal.2.4.1.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libtbb.12.17.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libtbb.12.dylib" "bin"
-  add_binary_if_exists video_args "$oidn_lib_dir/libtbb.dylib" "bin"
-else
-  echo "Warning: OIDN runtime libraries not found. Denoising may not work on other Macs."
-fi
-if [[ -n "$oidn_bin_dir" ]]; then
-  add_binary_if_exists video_args "$oidn_bin_dir/oidnDenoise" "bin"
-else
-  echo "Warning: oidnDenoise executable not found. Packaged denoise fallback will be unavailable."
-fi
-
+video_args=("${(@f)$(make_pyinstaller_args "Video Renderer" "$project_dir/tools/gui/video_app_entry.py" "$video_icon")}")
+append_oidn_binaries video_args "$oidn_lib_dir" "$oidn_bin_dir"
 if [[ -n "$ffmpeg_bin" ]]; then
   video_args+=(--add-binary "$ffmpeg_bin:bin")
-else
+fi
+
+if [[ -z "$oidn_lib_dir" ]]; then
+  echo "Warning: OIDN runtime libraries not found. Denoising may not work on other Macs."
+fi
+if [[ -z "$oidn_bin_dir" ]]; then
+  echo "Warning: oidnDenoise executable not found. Packaged denoise fallback will be unavailable."
+fi
+if [[ -z "$ffmpeg_bin" ]]; then
   echo "Warning: ffmpeg not found. Video Renderer.app will still require ffmpeg on the user's machine."
 fi
-
-if [[ -f "$video_icon" ]]; then
-  video_args+=(--icon "$video_icon")
-fi
-
-video_args+=("$project_dir/tools/gui/video_app_entry.py")
 
 "$python_bin" "${image_args[@]}"
 "$python_bin" "${video_args[@]}"
 
-ensure_oidn_symlinks "$dist_dir/Image Renderer.app"
-ensure_oidn_symlinks "$dist_dir/Video Renderer.app"
-patch_bundled_raytracer_rpaths "$dist_dir/Image Renderer.app"
-patch_bundled_raytracer_rpaths "$dist_dir/Video Renderer.app"
-sign_app_bundle "$dist_dir/Image Renderer.app"
-sign_app_bundle "$dist_dir/Video Renderer.app"
-
-# PyInstaller leaves sibling non-.app output directories in onedir mode on macOS.
-# The .app bundles are the only artifacts we want to maintain in dist_apps.
-rm -rf \
-  "$dist_dir/.DS_Store" \
-  "$dist_dir/Image Renderer" \
-  "$dist_dir/Video Renderer"
+finalize_app_bundle "$dist_dir/Image Renderer.app"
+finalize_app_bundle "$dist_dir/Video Renderer.app"
+prune_post_build_artifacts
 
 echo
 echo "Standalone apps created in:"
