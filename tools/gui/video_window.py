@@ -61,6 +61,7 @@ from scene_registry import SceneRegistry, load_scene_registry, to_scene_variant_
 from settings_summary import build_settings_summary
 from video_config_builder import RenderTaskConfig, build_render_task_config
 from video_preset_manager import VideoPresetManager
+from video_ui_state import VideoWindowStateController
 from video_widgets import DefinitionSection, TimedVectorSection
 from video_worker import RenderWorker
 
@@ -88,6 +89,7 @@ class AnimationFormulaGui(QMainWindow):
         self.current_preset_path: Optional[Path] = None
         self.current_preset_name: Optional[str] = None
         self._abort_requested = False
+        self.ui_state = VideoWindowStateController(self)
 
         self.setWindowTitle(VIDEO_RENDERER_TITLE)
         self.resize(*VIDEO_WINDOW_SIZE)
@@ -437,36 +439,6 @@ class AnimationFormulaGui(QMainWindow):
             self._show_input_error(str(exc))
             return None
 
-    def _enter_render_mode(self) -> None:
-        self.overlay_title.setText(STATUS_RENDERING)
-        self.overlay_msg.setText("")
-        self.progress.setValue(0)
-        self.abort_btn.show()
-        self.pause_btn.show()
-        self.return_btn.hide()
-        self.overlay.show()
-        self.right_body.setEnabled(False)
-        self.scene_combo.setEnabled(False)
-        self.variant_combo.setEnabled(False)
-        self.palette_combo.setEnabled(False)
-        self.fps_combo.setEnabled(False)
-        self.total_frames.setEnabled(False)
-        self.settings_btn.setEnabled(False)
-        self.render_btn.setVisible(False)
-        self.resume_btn.setVisible(False)
-
-    def _leave_render_mode(self) -> None:
-        self.overlay.hide()
-        self.right_body.setEnabled(True)
-        self.scene_combo.setEnabled(True)
-        self.variant_combo.setEnabled(True)
-        self.palette_combo.setEnabled(True)
-        self.fps_combo.setEnabled(True)
-        self.total_frames.setEnabled(True)
-        self.settings_btn.setEnabled(True)
-        self.render_btn.setVisible(True)
-        self.resume_btn.setVisible(False)
-
     def _on_render_clicked(self) -> None:
         if self.worker is not None:
             return
@@ -487,7 +459,7 @@ class AnimationFormulaGui(QMainWindow):
 
         self._abort_requested = False
         self.status.setText("Rendering started...")
-        self._enter_render_mode()
+        self.ui_state.show_rendering()
 
     def _on_worker_progress(self, done: int, total: int, msg: str) -> None:
         pct = int(100.0 * done / max(1, total))
@@ -500,7 +472,7 @@ class AnimationFormulaGui(QMainWindow):
             self.status.setText("Render aborted.")
             return
         self.status.setText("Render failed.")
-        self._leave_render_mode()
+        self.ui_state.show_failure()
         QMessageBox.critical(self, "Could not complete render", err)
 
     def _on_worker_done(self, video_path: str) -> None:
@@ -509,12 +481,7 @@ class AnimationFormulaGui(QMainWindow):
             return
         self.last_video_path = video_path
         self.status.setText(f"Successfully rendered: {video_path}")
-        self.overlay_title.setText("Successfully rendered")
-        self.overlay_msg.setText(video_path)
-        self.abort_btn.hide()
-        self.pause_btn.hide()
-        self.return_btn.show()
-        self.progress.setValue(100)
+        self.ui_state.show_success(video_path)
 
     def _on_worker_aborted(self, video_path: str) -> None:
         if video_path:
@@ -522,6 +489,7 @@ class AnimationFormulaGui(QMainWindow):
             self.status.setText(f"Render aborted. Partial video saved: {video_path}")
         else:
             self.status.setText("Render aborted.")
+        self.ui_state.show_abort_result()
 
     def _on_worker_finished(self) -> None:
         self.worker = None
@@ -529,29 +497,20 @@ class AnimationFormulaGui(QMainWindow):
             self._abort_requested = False
 
     def _on_return_clicked(self) -> None:
-        self._leave_render_mode()
+        self.ui_state.show_idle()
 
     def _on_pause_clicked(self) -> None:
         if self.worker is None:
             return
         self.worker.request_pause(True)
-        self.overlay.hide()
-        self.right_body.setEnabled(True)
-        self.scene_combo.setEnabled(True)
-        self.variant_combo.setEnabled(True)
-        self.palette_combo.setEnabled(True)
-        self.fps_combo.setEnabled(True)
-        self.total_frames.setEnabled(True)
-        self.settings_btn.setEnabled(True)
-        self.render_btn.setVisible(False)
-        self.resume_btn.setVisible(True)
+        self.ui_state.show_paused()
         self.status.setText("Paused (will pause at frame boundary).")
 
     def _on_resume_clicked(self) -> None:
         if self.worker is None:
             return
         self.worker.request_pause(False)
-        self._enter_render_mode()
+        self.ui_state.show_rendering()
         self.status.setText("Rendering resumed...")
 
     def _on_abort_clicked(self) -> None:
@@ -568,7 +527,7 @@ class AnimationFormulaGui(QMainWindow):
         self.worker.request_abort()
         self._abort_requested = True
         self.status.setText("Aborting render...")
-        self._leave_render_mode()
+        self.ui_state.show_idle()
 
 
 def main() -> int:
