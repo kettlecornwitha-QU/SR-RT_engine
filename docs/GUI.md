@@ -118,7 +118,7 @@ The right side contains four major sections:
 
 1. `Definitions`
 - add named formulas like:
-  - `halfway = arcosh(distance/2 + 1)`
+  - `halfway = arcosh(accel*distance/(2*c^2) + 1)*c/accel`
 - available built-in variables include:
   - `frame`
   - `fps`
@@ -133,8 +133,11 @@ The right side contains four major sections:
 4. `Camera Orientation (turns)`
 - timed rows with `pitch`, `yaw`
 
-Each timed section supports multiple ranges so different formulas can apply across different frame intervals.
-Of note, `Camera Velocity` is completely decoupled from `Camera Location`, so the user is free to specify formulas that are completely unphysical. For example, I can enter a `Camera Location` formula to make the camera slowly move up in the `y` direction along with a `Camera Velocity` formula to make the renderer think the camera is barreling forward in the `-z` direction at 99% the speed of light.
+Each component in `Camera Location`, `Camera Velocity`, and `Camera Orientation` is meant to be a function of `frame`. The video renderer will work on rendering each frame at a time, starting with frame `0`, and ending with frame `Total number of frames` - 1. To make the formulas more user-friendly, the variable `time` can be used, which is simply defined as `frame`/`fps`. Each timed section supports multiple ranges so different formulas can apply across different frame intervals.
+
+The user may customize the speed of light in the scene simply by being careful about how they are setting up the `Camera Location` and `Camera Velocity` formulas. The clearest thing to do would be to add a definition, e.g. `c = 300000000`, then insert `c`'s into your formulas to make the units work out. The important thing to note is that the rendering engine expects velocities to be given in geometrized units (where speed of light equals 1), so just divide your final velocity formulas by `c`.
+
+Also note that `Camera Velocity` is completely decoupled from `Camera Location`, so the user is free to specify formulas that are completely unphysical. For example, you can enter a `Camera Location` formula to make the camera slowly move up in the `y` direction along with a `Camera Velocity` formula to make the renderer think the camera is barreling forward in the `-z` direction at 99% the speed of light.
 
 ### Presets
 
