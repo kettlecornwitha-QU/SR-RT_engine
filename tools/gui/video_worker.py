@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional
 from PySide6.QtCore import QThread, Signal
 
 from gui_runtime import packaged_runtime
-from oidn_postprocess import can_run_oidn_postprocess, read_ppm, run_oidn_postprocess, write_png
+from image_io import read_ppm, write_png
+from oidn_postprocess import can_run_oidn_postprocess, run_oidn_postprocess
 from video_config_builder import RenderTaskConfig
 from video_formula import ExpressionError, ExpressionEvaluator, float_text, velocity_vector_to_turns
 
