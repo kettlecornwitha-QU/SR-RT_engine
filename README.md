@@ -105,6 +105,8 @@ Output:
 - `dist_apps/Image Renderer.app`
 - `dist_apps/Video Renderer.app`
 
+These `dist_apps/` bundles are the canonical local app builds. If you want a Dock icon or a local app to keep using after rebuilds, point it at the app inside `dist_apps/` and rebuild that directory when the code changes.
+
 What gets bundled:
 - the GUI Python runtime via PyInstaller
 - `build/raytracer`

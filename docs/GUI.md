@@ -9,6 +9,13 @@ Both apps are available as:
 - source-driven Python GUIs during development
 - packaged macOS `.app` releases for end users
 
+For local packaged-app testing, the canonical app bundles live in:
+
+- `dist_apps/Image Renderer.app`
+- `dist_apps/Video Renderer.app`
+
+The root-level `.app` bundles in the repo are no longer the preferred set to maintain.
+
 ## Image Renderer
 
 The Image Renderer is the simpler of the two GUIs. It is meant for interactive still-image testing.

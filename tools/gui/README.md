@@ -62,6 +62,8 @@ This creates:
 - `dist_apps/Image Renderer.app`
 - `dist_apps/Video Renderer.app`
 
+These `dist_apps/` app bundles are the canonical local builds. The root-level `.app` bundles are no longer the preferred path to maintain.
+
 The standalone builds bundle:
 - the Python GUI runtime
 - the raytracer binary
