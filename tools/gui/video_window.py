@@ -114,8 +114,8 @@ class AnimationFormulaGui(QMainWindow):
         self.variant_combo = QComboBox()
         self.variant_combo.currentIndexChanged.connect(self._on_variant_changed)
         self.palette_combo = QComboBox()
-        self.palette_combo.addItems(self.options_schema.big_scatter_palette_choices)
-        palette_idx = self.palette_combo.findText(self.options_schema.big_scatter_palette_default)
+        self.palette_combo.addItems(self.options_schema.choices.big_scatter_palette)
+        palette_idx = self.palette_combo.findText(self.options_schema.defaults.big_scatter_palette)
         if palette_idx >= 0:
             self.palette_combo.setCurrentIndex(palette_idx)
         scene_form.addRow("Scene", self.scene_combo)
@@ -127,9 +127,9 @@ class AnimationFormulaGui(QMainWindow):
         video_box = QGroupBox("Video")
         video_form = QFormLayout(video_box)
         self.fps_combo = QComboBox()
-        self.fps_combo.addItems([str(v) for v in self.options_schema.video_fps_choices])
-        if self.options_schema.video_fps_choices:
-            self.fps_combo.setCurrentText(str(self.options_schema.video_fps_choices[-1]))
+        self.fps_combo.addItems([str(v) for v in self.options_schema.choices.video_fps])
+        if self.options_schema.choices.video_fps:
+            self.fps_combo.setCurrentText(str(self.options_schema.choices.video_fps[-1]))
         self.total_frames = QLineEdit("")
         self.total_frames.setPlaceholderText(TOTAL_FRAMES_PLACEHOLDER)
         video_form.addRow("FPS", self.fps_combo)

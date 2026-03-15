@@ -96,9 +96,9 @@ class RaytracerGui(QMainWindow):
         self.variant_combo = QComboBox()
         self.variant_combo.currentIndexChanged.connect(self._on_variant_changed)
         self.big_scatter_palette_combo = QComboBox()
-        for p in self.options_schema.big_scatter_palette_choices:
+        for p in self.options_schema.choices.big_scatter_palette:
             self.big_scatter_palette_combo.addItem(p)
-        palette_idx = self.big_scatter_palette_combo.findText(self.options_schema.big_scatter_palette_default)
+        palette_idx = self.big_scatter_palette_combo.findText(self.options_schema.defaults.big_scatter_palette)
         if palette_idx >= 0:
             self.big_scatter_palette_combo.setCurrentIndex(palette_idx)
         scene_form.addRow("Scene", self.scene_combo)

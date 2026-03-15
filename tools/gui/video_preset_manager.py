@@ -94,12 +94,12 @@ class VideoPresetManager:
             if not isinstance(settings, dict):
                 settings = {}
             settings = dict(settings)
-            settings.setdefault("lighting_preset", self.options_schema.lighting_preset_default)
-            settings.setdefault("keep_frames", self.options_schema.video_keep_frames_default)
-            settings.setdefault("ppm_denoised_only", self.options_schema.ppm_denoised_only)
-            settings.setdefault("atmosphere_enabled", self.options_schema.atmosphere_enabled)
-            settings.setdefault("atmosphere_density", _float_text(self.options_schema.atmosphere_density))
-            settings.setdefault("atmosphere_color", self.options_schema.atmosphere_color)
+            settings.setdefault("lighting_preset", self.options_schema.defaults.lighting_preset)
+            settings.setdefault("keep_frames", self.options_schema.defaults.video_keep_frames)
+            settings.setdefault("ppm_denoised_only", self.options_schema.render.ppm_denoised_only)
+            settings.setdefault("atmosphere_enabled", self.options_schema.render.atmosphere_enabled)
+            settings.setdefault("atmosphere_density", _float_text(self.options_schema.render.atmosphere_density))
+            settings.setdefault("atmosphere_color", self.options_schema.render.atmosphere_color)
             migrated["settings"] = settings
 
             if "scene_name" not in migrated and "scene_base" in migrated:
