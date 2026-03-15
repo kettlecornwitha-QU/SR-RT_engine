@@ -27,6 +27,7 @@ class RenderWorker(QThread):
     failed = Signal(str)
     paused = Signal(bool)
     done = Signal(str)
+    aborted = Signal(str)
 
     def __init__(self, cfg: RenderTaskConfig) -> None:
         super().__init__()
@@ -42,9 +43,7 @@ class RenderWorker(QThread):
         with self._lock:
             self._abort = True
             render_proc = self._current_render_proc
-            encoder_proc = self._current_encoder_proc
         self._terminate_process(render_proc)
-        self._terminate_encoder(encoder_proc)
 
     def request_pause(self, pause: bool) -> None:
         with self._lock:
@@ -291,6 +290,50 @@ class RenderWorker(QThread):
                 except Exception:
                     pass
 
+    def _handle_abort(
+        self,
+        *,
+        manifest: Dict[str, Any],
+        manifest_path: Optional[Path],
+        run_start: float,
+        frames_rendered: int,
+        frames_streamed: int,
+        video_path: Path,
+        encoder: Optional[subprocess.Popen[bytes]],
+    ) -> None:
+        partial_video_path = ""
+        manifest["status"] = "aborted"
+        manifest["ended_utc"] = self._now_utc_iso()
+        manifest["duration_sec"] = time.time() - run_start
+        manifest.setdefault("progress", {})["frames_rendered"] = frames_rendered
+        manifest.setdefault("progress", {})["frames_streamed"] = frames_streamed
+
+        if frames_streamed > 0 and encoder is not None:
+            try:
+                enc_cmd = self._finalize_encoder(encoder)
+                manifest["ffmpeg"] = {
+                    **manifest.get("ffmpeg", {}),
+                    "command": enc_cmd,
+                    "mode": "streaming",
+                }
+                self._current_encoder_proc = None
+                if video_path.exists() and video_path.stat().st_size > 0:
+                    partial_video_path = str(video_path)
+                    manifest.setdefault("outputs", {})["partial_video_path"] = partial_video_path
+                    manifest.setdefault("outputs", {})["video_size_bytes"] = int(video_path.stat().st_size)
+            except Exception as exc:
+                manifest["abort_finalize_error"] = str(exc)
+        else:
+            try:
+                if video_path.exists() and video_path.stat().st_size == 0:
+                    video_path.unlink()
+            except Exception:
+                pass
+
+        if manifest_path is not None:
+            self._write_manifest(manifest_path, manifest)
+        self.aborted.emit(partial_video_path)
+
     def run(self) -> None:
         manifest_path: Optional[Path] = None
         manifest: Dict[str, Any] = {}
@@ -298,6 +341,7 @@ class RenderWorker(QThread):
         temp_work_dir: Optional[Path] = None
         frozen_binary_dir: Optional[Path] = None
         encoder: Optional[subprocess.Popen[bytes]] = None
+        frames_streamed = 0
         try:
             packaged_python_denoise = packaged_runtime() and self.cfg.denoise and can_run_oidn_postprocess()
             init_env = self._evaluate_definitions(frame=0, fps=self.cfg.fps)
@@ -389,21 +433,29 @@ class RenderWorker(QThread):
 
             for frame in range(total_frames):
                 if self._is_abort():
-                    manifest["status"] = "aborted"
-                    manifest["ended_utc"] = self._now_utc_iso()
-                    manifest["duration_sec"] = time.time() - run_start
-                    manifest.setdefault("progress", {})["frames_rendered"] = frame
-                    if manifest_path is not None:
-                        self._write_manifest(manifest_path, manifest)
+                    self._handle_abort(
+                        manifest=manifest,
+                        manifest_path=manifest_path,
+                        run_start=run_start,
+                        frames_rendered=frame,
+                        frames_streamed=frames_streamed,
+                        video_path=video_path,
+                        encoder=encoder,
+                    )
+                    encoder = None
                     return
                 while self._is_pause():
                     if self._is_abort():
-                        manifest["status"] = "aborted"
-                        manifest["ended_utc"] = self._now_utc_iso()
-                        manifest["duration_sec"] = time.time() - run_start
-                        manifest.setdefault("progress", {})["frames_rendered"] = frame
-                        if manifest_path is not None:
-                            self._write_manifest(manifest_path, manifest)
+                        self._handle_abort(
+                            manifest=manifest,
+                            manifest_path=manifest_path,
+                            run_start=run_start,
+                            frames_rendered=frame,
+                            frames_streamed=frames_streamed,
+                            video_path=video_path,
+                            encoder=encoder,
+                        )
+                        encoder = None
                         return
                     time.sleep(0.1)
 
@@ -514,12 +566,16 @@ class RenderWorker(QThread):
                 self._current_render_proc = None
 
                 if self._is_abort():
-                    manifest["status"] = "aborted"
-                    manifest["ended_utc"] = self._now_utc_iso()
-                    manifest["duration_sec"] = time.time() - run_start
-                    manifest.setdefault("progress", {})["frames_rendered"] = frame
-                    if manifest_path is not None:
-                        self._write_manifest(manifest_path, manifest)
+                    self._handle_abort(
+                        manifest=manifest,
+                        manifest_path=manifest_path,
+                        run_start=run_start,
+                        frames_rendered=frame,
+                        frames_streamed=frames_streamed,
+                        video_path=video_path,
+                        encoder=encoder,
+                    )
+                    encoder = None
                     return
 
                 if proc.returncode != 0:
@@ -536,6 +592,7 @@ class RenderWorker(QThread):
                     raise RuntimeError(f"Frame {frame} completed but final frame output was not found: {final_frame_path}")
 
                 self._stream_frame_to_encoder(encoder, final_frame_path)
+                frames_streamed += 1
 
                 if frames_dir is not None:
                     saved_png = frames_dir / f"frame_{frame:05d}.png"

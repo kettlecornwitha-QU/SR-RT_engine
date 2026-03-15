@@ -481,6 +481,7 @@ class AnimationFormulaGui(QMainWindow):
         self.worker.progress.connect(self._on_worker_progress)
         self.worker.failed.connect(self._on_worker_failed)
         self.worker.done.connect(self._on_worker_done)
+        self.worker.aborted.connect(self._on_worker_aborted)
         self.worker.finished.connect(self._on_worker_finished)
         self.worker.start()
 
@@ -514,6 +515,13 @@ class AnimationFormulaGui(QMainWindow):
         self.pause_btn.hide()
         self.return_btn.show()
         self.progress.setValue(100)
+
+    def _on_worker_aborted(self, video_path: str) -> None:
+        if video_path:
+            self.last_video_path = video_path
+            self.status.setText(f"Render aborted. Partial video saved: {video_path}")
+        else:
+            self.status.setText("Render aborted.")
 
     def _on_worker_finished(self) -> None:
         self.worker = None
