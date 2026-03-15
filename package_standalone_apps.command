@@ -162,7 +162,12 @@ if ! "$python_bin" -c "import PySide6" >/dev/null 2>&1; then
 fi
 
 mkdir -p "$dist_dir" "$build_dir"
-rm -rf "$dist_dir/Image Renderer.app" "$dist_dir/Video Renderer.app"
+rm -rf \
+  "$dist_dir/.DS_Store" \
+  "$dist_dir/Image Renderer.app" \
+  "$dist_dir/Video Renderer.app" \
+  "$dist_dir/Image Renderer" \
+  "$dist_dir/Video Renderer"
 
 image_icon="$project_dir/Image Renderer.app/Contents/Resources/image_renderer.icns"
 video_icon="$project_dir/Video Renderer.app/Contents/Resources/video_renderer.icns"
@@ -257,6 +262,13 @@ patch_bundled_raytracer_rpaths "$dist_dir/Image Renderer.app"
 patch_bundled_raytracer_rpaths "$dist_dir/Video Renderer.app"
 sign_app_bundle "$dist_dir/Image Renderer.app"
 sign_app_bundle "$dist_dir/Video Renderer.app"
+
+# PyInstaller leaves sibling non-.app output directories in onedir mode on macOS.
+# The .app bundles are the only artifacts we want to maintain in dist_apps.
+rm -rf \
+  "$dist_dir/.DS_Store" \
+  "$dist_dir/Image Renderer" \
+  "$dist_dir/Video Renderer"
 
 echo
 echo "Standalone apps created in:"
