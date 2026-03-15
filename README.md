@@ -11,6 +11,14 @@ Single-file CPU path tracer with:
 - AOV outputs (`albedo`, `normal`)
 - Optional OIDN denoising (`--denoise`)
 
+## A Physics Caveat
+
+There are two primary independent (of each other) visual effects from traveling at relativistic speeds. One is relativistic aberration and the other (I'm bundling two related effects here) is relativistic beaming and doppler shift. Relativistic beaming and doppler shift is basically this: light from sources that you're moving towards increases in brightness and frequency, and light from sources that you're moving away from decreases in brightness and frequency. Relativistic aberration is how an observer's field of view changes at relativistic speeds (and it also encompasses the phenomenon of Terrell rotation, if you were wondering why I left that one out of the list).
+
+Relativistic aberration is quite interesting to observe, so I built this ray tracer to visualize this phenomenon, but I completely ignored relativistic beaming and doppler shift for a couple reasons. Beaming would just make everything more difficult to see, either due to being too dark or too bright (save for a small narrow circle around the bright spot in the field of view).
+
+And a physically realistic, visual representation of doppler shift is more complicated than most people realize. It's not that it would be too difficult for me to implement, it's just that I'd have to make a lot of arbitrary choices about the hidden emission properties of the virtual lights and the reflective properties of the materials. Furthermore, at only about 86% the speed of light, all frequencies of visible light will have been shifted out of the visible range in almost all directions, so whatever frequencies of light you're seeing at that point have no correlation to the light you saw when standing still.
+
 ## For Users
 
 If you just want to use the renderers on an Apple Silicon Mac, the intended path is:

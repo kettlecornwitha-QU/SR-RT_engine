@@ -19,6 +19,8 @@ Recommended checks:
 - open both packaged apps locally
 - confirm the Image Renderer can render with denoise enabled
 - confirm the Video Renderer can render a short test clip
+- confirm aborting a short video render preserves a partial `.mp4` when frames have already been encoded
+- if `Keep frames` is enabled, confirm retained frame outputs are written as `.png`
 - skim the README user-facing instructions
 
 Helpful local checks:

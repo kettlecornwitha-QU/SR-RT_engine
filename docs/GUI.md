@@ -128,6 +128,7 @@ The right side contains four major sections:
 - timed rows with `pitch`, `yaw`
 
 Each timed section supports multiple ranges so different formulas can apply across different frame intervals.
+Of note, `Camera Velocity` is completely decoupled from `Camera Location`, so the user is free to specify formulas that are completely unphysical. For example, I can enter a `Camera Location` formula to make the camera slowly move up in the `y` direction along with a `Camera Velocity` formula to make the renderer think the camera is barreling forward in the `-z` direction at 99% the speed of light.
 
 ### Presets
 
@@ -173,10 +174,17 @@ If aborted:
 Packaged app outputs go to:
 - `~/Pictures/SR-RT Engine/outputs`
 
+Video rendering now uses a streamed encode pipeline:
+- one long-running `ffmpeg` process is started near the beginning of the job
+- each frame is rendered into a temporary working area
+- the frame is optionally denoised
+- the final per-frame image is streamed immediately into `ffmpeg`
+- the temporary working files for that frame are then cleaned up
+
 Depending on settings:
 - the final video is written there
-- frame files may be kept there, or
-- frame files may be written to a temporary directory and cleaned up after encoding
+- if `Keep frames` is on, final per-frame images are also saved there as `.png`
+- if `Keep frames` is off, the render normally leaves only the final video and manifest behind
 
 Video renders also write a manifest JSON describing the job:
 - scene
@@ -185,6 +193,11 @@ Video renders also write a manifest JSON describing the job:
 - outputs
 - binary identity
 - progress metadata
+
+If aborted:
+- the app still returns to its normal pre-render state
+- if enough frames have already been encoded, the partial `.mp4` is preserved in `outputs/` when possible
+- the manifest records that the job was aborted and whether a partial video was kept
 
 ## Shared behavior
 

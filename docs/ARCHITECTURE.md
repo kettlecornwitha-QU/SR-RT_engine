@@ -90,9 +90,18 @@ The video render flow adds one more layer:
 1. The Video Renderer GUI evaluates formulas for each frame.
 2. It freezes the job configuration into a per-render snapshot.
 3. Each frame launches the same `raytracer` binary with frame-specific camera values.
-4. Rendered frames are optionally denoised, then encoded into a video with `ffmpeg`.
+4. Each frame is rendered into a one-frame temporary working area.
+5. Rendered frames are optionally denoised on a per-frame basis.
+6. The final frame image is streamed immediately into a long-running `ffmpeg` encoder.
+7. Temporary files for that frame are cleaned up before moving on to the next frame.
 
 That snapshot/freeze step is important: once a video render begins, later source edits or scene tweaks should not affect frames already queued for that job.
+
+Abort behavior is part of that same pipeline:
+
+- the active frame render can be interrupted
+- the streaming encoder is finalized when possible
+- if frames have already been encoded, a partial `.mp4` may be preserved instead of discarded
 
 ## Core Renderer Modules
 
@@ -309,8 +318,12 @@ The image GUI is responsible for:
 Main files:
 
 - [video_window.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_window.py)
+- [video_ui_state.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_ui_state.py)
 - [video_config_builder.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_config_builder.py)
 - [video_worker.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_worker.py)
+- [video_job_runner.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_job_runner.py)
+- [video_encoder.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_encoder.py)
+- [video_manifest.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_manifest.py)
 - [video_formula.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_formula.py)
 - [video_widgets.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_widgets.py)
 - [video_preset_manager.py](/Users/lukewalker/dev/SR-RT_engine/tools/gui/video_preset_manager.py)
@@ -322,7 +335,9 @@ The video GUI adds logic the image GUI does not need:
 - multi-section camera timelines
 - preset save/load support
 - render-job freezing and snapshotting
-- per-frame rendering and final video encoding
+- per-frame rendering and streamed video encoding
+- optional PNG frame retention when `Keep frames` is enabled
+- partial-video preservation on abort when possible
 
 The compatibility launcher:
 
