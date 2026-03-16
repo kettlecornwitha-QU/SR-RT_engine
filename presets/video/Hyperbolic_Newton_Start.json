@@ -5,12 +5,14 @@
   "scene_name": "row_scatter",
   "palette": "balanced",
   "fps": "30",
-  "total_frames": "int(fps*total_time/30)",
+  "total_frames": "int(fps*total_time/6)",
   "definitions": [
     "start = 76",
     "end = -150",
     "distance = abs(end - start)",
-    "total_time = sqrt(distance*(distance + 4))"
+    "c = 5",
+    "accel = 1",
+    "total_time = sqrt(accel*distance*(accel*distance + 4*c^2))/(accel*c)"
   ],
   "camera_location": {
     "rows": [
@@ -18,9 +20,9 @@
         "fields": {
           "x": "0",
           "y": "1.2",
-          "z": "start - sqrt(time^2 + 1) + 1"
+          "z": "start - c^2/accel*(sqrt(accel^2*time^2/c^2 + 1) - 1)"
         },
-        "range_text": "int(fps*halfway)"
+        "range_text": "int(fps*halfway/mult)"
       }
     ]
   },
@@ -56,7 +58,7 @@
     "adaptive_threshold": "0.01",
     "denoise": true,
     "lighting_preset": "cornell-ceiling-plus-key",
-    "ppm_denoised_only": false,
+    "ppm_denoised_only": true,
     "atmosphere_enabled": false,
     "atmosphere_density": "0.03",
     "atmosphere_color": "0.74,0.83,0.95",

@@ -42,8 +42,8 @@
     "rows": [
       {
         "fields": {
-          "pitch": "-1.5*normed_time^2*(normed_time-1)^2*sin(6*normed_time)",
-          "yaw": "3*normed_time^2*(normed_time-1)^2*sin(10*normed_time)"
+          "pitch": "-1.5*normed_time^2*(normed_time - 1)^2*sin(6*normed_time)",
+          "yaw": "3*normed_time^2*(normed_time - 1)^2*sin(10*normed_time)"
         },
         "range_text": ""
       }

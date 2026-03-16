@@ -10,7 +10,9 @@
     "start = 76",
     "end = -150",
     "distance = abs(end - start)",
-    "halfway = arcosh(distance/2 + 1)",
+    "c = 5",
+    "accel = 1",
+    "halfway = arcosh(accel*distance/(2*c^2) + 1)*c/accel",
     "total_time = 2*halfway",
     "normed_time = time/total_time"
   ],
@@ -20,7 +22,7 @@
         "fields": {
           "x": "0",
           "y": "1.2",
-          "z": "start - cosh(time) - 1"
+          "z": "start - (cosh(accel*time/c) - 1)*c^2/accel"
         },
         "range_text": "int(fps*halfway)"
       },
@@ -28,7 +30,7 @@
         "fields": {
           "x": "0",
           "y": "1.2",
-          "z": "cosh(time - 2*halfway) - 1 + start - distance"
+          "z": "(cosh(accel/c*(time - 2*halfway)) - 1)*c^2/accel + end"
         },
         "range_text": ""
       }
@@ -40,7 +42,7 @@
         "fields": {
           "x": "0",
           "y": "0",
-          "z": "-tanh(time)"
+          "z": "-tanh(accel*time/c)"
         },
         "range_text": "int(fps*halfway)"
       },
@@ -48,7 +50,7 @@
         "fields": {
           "x": "0",
           "y": "0",
-          "z": "tanh(time - 2*halfway)"
+          "z": "tanh(accel/c*(time - 2*halfway))"
         },
         "range_text": ""
       }
@@ -58,8 +60,8 @@
     "rows": [
       {
         "fields": {
-          "pitch": "-1.5*normed_time^2*(normed_time-1)^2*sin(6*normed_time)",
-          "yaw": "3*normed_time^2*(normed_time-1)^2*sin(10*normed_time)"
+          "pitch": "-1.5*normed_time^2*(normed_time - 1)^2*sin(6*normed_time)",
+          "yaw": "3*normed_time^2*(normed_time - 1)^2*sin(10*normed_time)"
         },
         "range_text": ""
       }
