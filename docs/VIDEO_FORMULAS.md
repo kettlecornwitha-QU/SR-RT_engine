@@ -43,16 +43,38 @@ distance = abs(end - start)
 halfway = arcosh(distance / 2 + 1)
 ```
 
-Definitions are evaluated in order from top to bottom.
+Definitions are resolved by dependency, not strictly by the order they appear in the UI.
 
-That means later definitions can depend on earlier ones:
+That means forward references are allowed:
 
 ```text
-a = 2
-b = a + 3
+a = b + 3
+b = 2
 ```
 
-but not the other way around.
+This is also valid:
+
+```text
+start = 76
+end = -150
+distance = abs(end - start)
+halfway = arcosh(accel * distance / (2 * c^2) + 1) * c / accel
+accel = 1
+c = 5
+```
+
+The main restrictions are:
+
+- definition names must still be unique
+- genuinely unknown symbols still raise an error
+- circular definitions still raise an error
+
+Example of an invalid circular pair:
+
+```text
+a = b + 1
+b = a + 1
+```
 
 ## Supported Operators
 
@@ -143,6 +165,7 @@ Typical errors include:
 - `Unknown symbol: name`
 - `Unsupported function: name`
 - `Syntax error: ...`
+- `Circular or unresolved definition dependency among: ...`
 
 ## Camera Sections
 

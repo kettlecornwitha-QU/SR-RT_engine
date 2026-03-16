@@ -101,6 +101,16 @@ Scene controls:
 Video controls:
 - `FPS`
 - `Total number of frames`
+- `Quick Test`
+  - temporarily overrides render-quality settings for fast preview runs
+  - uses:
+    - `FPS 24`
+    - `640x360`
+    - `SPP 16`
+    - `Max depth 2`
+    - `Denoise off`
+    - `Only write denoised PPM off`
+  - when turned back off, restores the previous values it replaced
 
 Status/info:
 - current preset name
@@ -123,6 +133,7 @@ The right side contains four major sections:
   - `frame`
   - `fps`
   - `time`
+- definitions may reference each other in any order as long as there is no circular dependency
 
 2. `Camera Location`
 - timed rows with `x`, `y`, `z`
