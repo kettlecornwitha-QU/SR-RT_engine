@@ -1,5 +1,9 @@
 # SR-RT_engine
 
+<p align="center">
+  <img src="docs/images/row_scatter_20260315_081405.png" alt="SR-RT_engine render preview" width="1000">
+</p>
+
 Download the packaged apps from **GitHub Releases**:
 - https://github.com/kettlecornwitha-QU/SR-RT_engine/releases
 
