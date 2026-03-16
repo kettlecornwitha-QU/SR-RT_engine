@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QFileDialog,
@@ -89,6 +90,7 @@ class AnimationFormulaGui(QMainWindow):
         self.current_preset_path: Optional[Path] = None
         self.current_preset_name: Optional[str] = None
         self._abort_requested = False
+        self._quick_test_snapshot: Optional[Dict[str, object]] = None
         self.ui_state = VideoWindowStateController(self)
 
         self.setWindowTitle(VIDEO_RENDERER_TITLE)
@@ -132,8 +134,11 @@ class AnimationFormulaGui(QMainWindow):
             self.fps_combo.setCurrentText(str(self.options_schema.choices.video_fps[-1]))
         self.total_frames = QLineEdit("")
         self.total_frames.setPlaceholderText(TOTAL_FRAMES_PLACEHOLDER)
+        self.quick_test_check = QCheckBox("Quick Test")
+        self.quick_test_check.toggled.connect(self._on_quick_test_toggled)
         video_form.addRow("FPS", self.fps_combo)
         video_form.addRow("Total number of frames", self.total_frames)
+        video_form.addRow(self.quick_test_check)
         left.addWidget(video_box)
 
         self.preset_label = QLabel(PRESET_PLACEHOLDER_TEXT)
@@ -304,6 +309,57 @@ class AnimationFormulaGui(QMainWindow):
         self.settings_summary.setText(
             build_settings_summary(self.settings_dialog, include_keep_frames=True, include_lighting=True)
         )
+
+    def _set_fps_value(self, fps_value: int) -> None:
+        target = str(fps_value)
+        idx = self.fps_combo.findText(target)
+        if idx >= 0:
+            self.fps_combo.setCurrentIndex(idx)
+            return
+        self.fps_combo.addItem(target)
+        self.fps_combo.setCurrentText(target)
+
+    def _capture_quick_test_snapshot(self) -> Dict[str, object]:
+        return {
+            "fps": self.fps_combo.currentText(),
+            "width": self.settings_dialog.width.value(),
+            "height": self.settings_dialog.height.value(),
+            "spp": self.settings_dialog.spp.value(),
+            "max_depth": self.settings_dialog.max_depth.value(),
+            "denoise": self.settings_dialog.denoise.isChecked(),
+            "ppm_denoised_only": self.settings_dialog.ppm_denoised_only.isChecked(),
+        }
+
+    def _apply_quick_test_values(self) -> None:
+        self._set_fps_value(24)
+        self.settings_dialog.width.setValue(640)
+        self.settings_dialog.height.setValue(360)
+        self.settings_dialog.spp.setValue(16)
+        self.settings_dialog.max_depth.setValue(2)
+        self.settings_dialog.denoise.setChecked(False)
+        self.settings_dialog.ppm_denoised_only.setChecked(False)
+
+    def _restore_quick_test_snapshot(self) -> None:
+        if self._quick_test_snapshot is None:
+            return
+        snap = self._quick_test_snapshot
+        self.fps_combo.setCurrentText(str(snap["fps"]))
+        self.settings_dialog.width.setValue(int(snap["width"]))
+        self.settings_dialog.height.setValue(int(snap["height"]))
+        self.settings_dialog.spp.setValue(int(snap["spp"]))
+        self.settings_dialog.max_depth.setValue(int(snap["max_depth"]))
+        self.settings_dialog.denoise.setChecked(bool(snap["denoise"]))
+        self.settings_dialog.ppm_denoised_only.setChecked(bool(snap["ppm_denoised_only"]))
+
+    def _on_quick_test_toggled(self, checked: bool) -> None:
+        if checked:
+            if self._quick_test_snapshot is None:
+                self._quick_test_snapshot = self._capture_quick_test_snapshot()
+            self._apply_quick_test_values()
+        else:
+            self._restore_quick_test_snapshot()
+            self._quick_test_snapshot = None
+        self._refresh_settings_summary()
 
     def _preset_dir(self) -> Path:
         return self.preset_manager.preset_dir()
