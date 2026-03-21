@@ -181,7 +181,7 @@ class AnimationFormulaGui(QMainWindow):
         right_layout = QVBoxLayout(self.right_body)
         right_layout.setSpacing(RIGHT_PANEL_SPACING)
 
-        self.definitions = DefinitionSection(max_rows=10)
+        self.definitions = DefinitionSection(max_rows=15)
         right_layout.addWidget(self.definitions)
         right_layout.addSpacing(SECTION_PADDING_SPACING)
 

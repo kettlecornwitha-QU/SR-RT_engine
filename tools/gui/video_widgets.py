@@ -35,7 +35,7 @@ class DefinitionRow(QWidget):
 
         self.edit = QLineEdit()
         self.edit.setPlaceholderText("name = expression")
-        self.edit.setMinimumWidth(760)
+        self.edit.setMinimumWidth(570)
         layout.addWidget(self.edit, 1)
 
         self.remove_btn = QPushButton("-")
@@ -58,7 +58,7 @@ class DefinitionRow(QWidget):
 
 
 class DefinitionSection(QGroupBox):
-    def __init__(self, max_rows: int = 10) -> None:
+    def __init__(self, max_rows: int = 15) -> None:
         super().__init__("Definitions")
         self.max_rows = max_rows
         self.rows: List[DefinitionRow] = []
@@ -242,13 +242,13 @@ class TimedVectorSection(QGroupBox):
             rb = row.range_block
             rb.setVisible(True)
             if i == 0:
-                rb.set_mode(True, "Range: frame 0 through (and including) frame ", "end frame expression")
+                rb.set_mode(True, "Range: frame 0 through and including frame ", "end frame expression")
             elif i == n - 1:
-                rb.set_mode(False, f"Range: frame 1 + [{self._prev_locked_or_placeholder(i)}] to end")
+                rb.set_mode(False, f"Range: frame [1 + {self._prev_locked_or_placeholder(i)}] to end")
             else:
                 rb.set_mode(
                     True,
-                    f"Range: frame 1 + [{self._prev_locked_or_placeholder(i)}] through and including frame ",
+                    f"Range: frame [1 + {self._prev_locked_or_placeholder(i)}] through and including frame ",
                     "end frame expression",
                 )
 
