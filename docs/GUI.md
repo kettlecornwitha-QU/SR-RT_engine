@@ -28,10 +28,11 @@ Left panel:
 - `Big Scatter Palette`: only relevant for `big_scatter`
 - `Player Velocity`: either:
   - `Speed + Yaw + Pitch`
-  - `Vector (vx, vy, vz)`
+  - `Vector (vˣ, vʸ, vᶻ)`
 - `Camera View`:
   - optional camera position override: `x`, `y`, `z`
   - camera orientation: `yaw turns`, `pitch turns`
+- `About...`: shows app version/build info and runtime details
 - `Settings...`: opens the render settings dialog
 - `Render`: starts a still-image render
 - `Save`: appears after a successful render and writes the current result to `outputs/` as a `.png`
@@ -87,6 +88,18 @@ In packaged builds, denoising is performed as a GUI-side post-process:
 
 This is more reliable than asking the bundled renderer binary to denoise internally.
 
+### Startup diagnostics
+
+On startup, the Image Renderer performs a lightweight runtime self-check:
+- confirms the `raytracer` binary exists
+- confirms the renderer responds to `--print-options-schema`
+
+If the check fails:
+- rendering is disabled
+- the app shows a clear startup error dialog
+
+If the runtime looks usable but something optional is missing, the app may show a warning instead.
+
 ## Video Renderer
 
 The Video Renderer is designed for formula-driven animation rendering.
@@ -118,6 +131,7 @@ Status/info:
 - render status text
 
 Actions:
+- `About...`
 - `Settings...`
 - `Render`
 - `Resume` when a paused render is resumable
@@ -129,6 +143,7 @@ The right side contains four major sections:
 1. `Definitions`
 - add named formulas like:
   - `halfway = arcosh(accel*distance/(2*c^2) + 1)*c/accel`
+- up to `15` definitions may be entered
 - available built-in variables include:
   - `frame`
   - `fps`
@@ -218,6 +233,19 @@ If aborted:
 - the app still returns to its normal pre-render state
 - if enough frames have already been encoded, the partial `.mp4` is preserved in `outputs/` when possible
 - the manifest records that the job was aborted and whether a partial video was kept
+
+### Startup diagnostics
+
+On startup, the Video Renderer performs a lightweight runtime self-check:
+- confirms the `raytracer` binary exists
+- confirms the renderer responds to `--print-options-schema`
+- confirms `ffmpeg` is available for video encoding
+
+If the check fails:
+- rendering controls are disabled
+- the app shows a clear startup error dialog
+
+If the runtime looks usable but something optional is missing, the app may show a warning instead.
 
 ## Shared behavior
 

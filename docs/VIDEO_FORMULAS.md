@@ -68,6 +68,7 @@ The main restrictions are:
 - definition names must still be unique
 - genuinely unknown symbols still raise an error
 - circular definitions still raise an error
+- the GUI currently allows up to `15` definition rows
 
 Example of an invalid circular pair:
 
@@ -208,9 +209,9 @@ The meaning of the ranges is:
 - first row:
   - `frame 0` through and including the entered end frame
 - middle rows:
-  - `frame 1 + [previous end]` through and including the entered end frame
+  - `frame [1 + previous end]` through and including the entered end frame
 - last row:
-  - `frame 1 + [previous end]` to the end of the render
+  - `frame [1 + previous end]` to the end of the render
 
 So if you have two rows and the first row range is:
 

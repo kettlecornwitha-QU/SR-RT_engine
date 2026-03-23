@@ -17,6 +17,8 @@ Current release artifacts:
 Recommended checks:
 - build the renderer locally
 - open both packaged apps locally
+- confirm `About...` opens in both apps and shows sane version/runtime details
+- confirm neither app reports a startup-check failure on the release machine
 - confirm the Image Renderer can render with denoise enabled
 - confirm the Video Renderer can render a short test clip
 - confirm aborting a short video render preserves a partial `.mp4` when frames have already been encoded

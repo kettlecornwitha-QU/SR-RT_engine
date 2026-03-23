@@ -7,9 +7,11 @@ This is a lightweight desktop GUI wrapper around the raytracer binary. In develo
 - Scene selection + variant selection (for scene families like `scatter` and `materials`)
 - Player velocity input in two modes:
   - `speed + yaw/pitch`
-  - vector components `(vx, vy, vz)` (converted internally)
+  - vector components `(vˣ, vʸ, vᶻ)` (converted internally)
 - Camera view yaw/pitch controls
 - Fog toggle + density slider + color input
+- `About...` dialog with version/runtime details
+- startup runtime self-checks for renderer availability, and `ffmpeg` for video
 - Render button + Cancel behavior
 - Large image preview pane
 - Basic render settings (resolution, spp, max depth, adaptive, denoise)
