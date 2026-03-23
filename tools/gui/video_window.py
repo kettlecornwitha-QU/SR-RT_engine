@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -65,6 +65,7 @@ from video_preset_manager import VideoPresetManager
 from video_ui_state import VideoWindowStateController
 from video_widgets import DefinitionSection, TimedVectorSection
 from video_worker import RenderWorker
+from runtime_diagnostics import build_about_text, check_runtime
 
 
 class AnimationFormulaGui(QMainWindow):
@@ -99,6 +100,7 @@ class AnimationFormulaGui(QMainWindow):
         self._build_ui()
         self._populate_scene_controls()
         self._on_scene_changed()
+        QTimer.singleShot(0, self._run_startup_checks)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -150,6 +152,9 @@ class AnimationFormulaGui(QMainWindow):
         left.addWidget(self.settings_summary)
 
         btn_row = QHBoxLayout()
+        self.about_btn = QPushButton("About...")
+        style_button(self.about_btn, primary=False)
+        self.about_btn.clicked.connect(self._on_about_clicked)
         self.settings_btn = QPushButton("Settings...")
         style_button(self.settings_btn, primary=False)
         self.settings_btn.clicked.connect(self.settings_dialog.exec)
@@ -160,6 +165,7 @@ class AnimationFormulaGui(QMainWindow):
         style_button(self.resume_btn, primary=True)
         self.resume_btn.setVisible(False)
         self.resume_btn.clicked.connect(self._on_resume_clicked)
+        btn_row.addWidget(self.about_btn)
         btn_row.addWidget(self.settings_btn)
         btn_row.addWidget(self.render_btn)
         btn_row.addWidget(self.resume_btn)
@@ -189,7 +195,11 @@ class AnimationFormulaGui(QMainWindow):
         right_layout.addWidget(self.camera_location)
         right_layout.addSpacing(SECTION_PADDING_SPACING)
 
-        self.camera_velocity = TimedVectorSection("Camera Velocity (scene frame)", ["x", "y", "z"], max_rows=10)
+        self.camera_velocity = TimedVectorSection(
+            "Camera Velocity (scene frame)",
+            [("x", "v<sup>x</sup>"), ("y", "v<sup>y</sup>"), ("z", "v<sup>z</sup>")],
+            max_rows=10,
+        )
         right_layout.addWidget(self.camera_velocity)
         right_layout.addSpacing(SECTION_PADDING_SPACING)
 
@@ -279,6 +289,26 @@ class AnimationFormulaGui(QMainWindow):
         super().resizeEvent(event)
         if self.centralWidget() is not None:
             self.overlay.setGeometry(self.centralWidget().rect())
+
+    def _on_about_clicked(self) -> None:
+        text = build_about_text(
+            app_name=self.windowTitle(),
+            project_root=self.project_root,
+            raytracer_bin=self.raytracer_bin,
+            options_schema_version=self.options_schema.schema_version,
+            scene_registry_version=self.scene_registry.schema_version,
+        )
+        QMessageBox.information(self, f"About {self.windowTitle()}", text)
+
+    def _run_startup_checks(self) -> None:
+        diagnostics = check_runtime(self.raytracer_bin, require_ffmpeg=True, prefer_oidn=True)
+        if diagnostics.critical:
+            self.render_btn.setEnabled(False)
+            self.resume_btn.setEnabled(False)
+            self.status.setText("Startup check failed")
+            QMessageBox.critical(self, "Startup Check Failed", "\n\n".join(diagnostics.critical))
+        elif diagnostics.warnings:
+            QMessageBox.warning(self, "Startup Check Warning", "\n\n".join(diagnostics.warnings))
 
     def _populate_scene_controls(self) -> None:
         populate_scene_combo(self.scene_combo, self.scene_registry)

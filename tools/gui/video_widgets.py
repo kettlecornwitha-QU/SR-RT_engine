@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -23,6 +23,8 @@ from gui_constants import (
     FORMULA_SECTION_SPACING,
 )
 from video_formula import sanitize_frontend_expr
+
+FieldSpec = Union[str, Tuple[str, str]]
 
 
 class DefinitionRow(QWidget):
@@ -132,7 +134,7 @@ class RangeBlock(QWidget):
 class TimedVectorRow(QWidget):
     range_changed = Signal()
 
-    def __init__(self, labels: List[str], on_add, on_remove) -> None:
+    def __init__(self, labels: List[FieldSpec], on_add, on_remove) -> None:
         super().__init__()
         self.fields: Dict[str, QLineEdit] = {}
 
@@ -151,17 +153,21 @@ class TimedVectorRow(QWidget):
         fields_col = QVBoxLayout()
         fields_col.setContentsMargins(0, 0, 0, 0)
         fields_col.setSpacing(FORMULA_FIELD_COLUMN_SPACING)
-        for label in labels:
+        for spec in labels:
+            if isinstance(spec, tuple):
+                field_key, display_label = spec
+            else:
+                field_key = display_label = spec
             line = QHBoxLayout()
             line.setContentsMargins(0, 0, 0, 0)
             line.setSpacing(FORMULA_LINE_SPACING)
-            lbl = QLabel(f"{label} =")
+            lbl = QLabel(f"{display_label} =")
             line.addWidget(lbl)
             edit = QLineEdit()
-            edit.setPlaceholderText(f"{label} expression")
+            edit.setPlaceholderText(f"{field_key} expression")
             edit.setMinimumWidth(0)
             edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self.fields[label] = edit
+            self.fields[field_key] = edit
             line.addWidget(edit, 1)
             fields_col.addLayout(line)
         row.addLayout(fields_col, 1)
@@ -192,7 +198,7 @@ class TimedVectorRow(QWidget):
 
 
 class TimedVectorSection(QGroupBox):
-    def __init__(self, title: str, labels: List[str], max_rows: int = 10) -> None:
+    def __init__(self, title: str, labels: List[FieldSpec], max_rows: int = 10) -> None:
         super().__init__(title)
         self.labels = labels
         self.max_rows = max_rows

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -57,6 +57,7 @@ from scene_controls import (
 )
 from scene_registry import SceneRegistry, load_scene_registry, to_scene_variant_map
 from settings_summary import build_settings_summary
+from runtime_diagnostics import build_about_text, check_runtime
 
 
 class RaytracerGui(QMainWindow):
@@ -82,6 +83,7 @@ class RaytracerGui(QMainWindow):
         self._build_ui()
         self._populate_scene_controls()
         self._on_scene_changed()
+        QTimer.singleShot(0, self._run_startup_checks)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -130,11 +132,11 @@ class RaytracerGui(QMainWindow):
         vel_layout.addWidget(self.ab_yaw, 3, 1)
         vel_layout.addWidget(QLabel("Pitch turns"), 4, 0)
         vel_layout.addWidget(self.ab_pitch, 4, 1)
-        vel_layout.addWidget(QLabel("vx"), 5, 0)
+        vel_layout.addWidget(QLabel("v<sup>x</sup>"), 5, 0)
         vel_layout.addWidget(self.vx, 5, 1)
-        vel_layout.addWidget(QLabel("vy"), 6, 0)
+        vel_layout.addWidget(QLabel("v<sup>y</sup>"), 6, 0)
         vel_layout.addWidget(self.vy, 6, 1)
-        vel_layout.addWidget(QLabel("vz"), 7, 0)
+        vel_layout.addWidget(QLabel("v<sup>z</sup>"), 7, 0)
         vel_layout.addWidget(self.vz, 7, 1)
         controls.addWidget(vel_box)
 
@@ -165,6 +167,9 @@ class RaytracerGui(QMainWindow):
         controls.addWidget(self.settings_summary)
 
         button_row = QHBoxLayout()
+        self.about_button = QPushButton("About...")
+        style_button(self.about_button, primary=False)
+        self.about_button.clicked.connect(self._on_about_clicked)
         self.settings_button = QPushButton("Settings...")
         style_button(self.settings_button, primary=False)
         self.settings_button.clicked.connect(self._on_settings_clicked)
@@ -175,6 +180,7 @@ class RaytracerGui(QMainWindow):
         style_button(self.save_button, primary=False)
         self.save_button.clicked.connect(self._on_save_clicked)
         self.save_button.hide()
+        button_row.addWidget(self.about_button)
         button_row.addWidget(self.settings_button)
         button_row.addWidget(self.render_button)
         button_row.addWidget(self.save_button)
@@ -226,6 +232,26 @@ class RaytracerGui(QMainWindow):
 
     def _on_settings_changed(self) -> None:
         self._refresh_settings_summary()
+
+    def _on_about_clicked(self) -> None:
+        text = build_about_text(
+            app_name=self.windowTitle(),
+            project_root=self.project_root,
+            raytracer_bin=self.raytracer_bin,
+            options_schema_version=self.options_schema.schema_version,
+            scene_registry_version=self.scene_registry.schema_version,
+        )
+        QMessageBox.information(self, f"About {self.windowTitle()}", text)
+
+    def _run_startup_checks(self) -> None:
+        diagnostics = check_runtime(self.raytracer_bin, prefer_oidn=True)
+        if diagnostics.critical:
+            self.render_button.setEnabled(False)
+            self.save_button.setEnabled(False)
+            self.status_label.setText("Startup check failed")
+            QMessageBox.critical(self, "Startup Check Failed", "\n\n".join(diagnostics.critical))
+        elif diagnostics.warnings:
+            QMessageBox.warning(self, "Startup Check Warning", "\n\n".join(diagnostics.warnings))
 
     def _refresh_settings_summary(self) -> None:
         self.settings_summary.setText(build_settings_summary(self.settings_dialog))
