@@ -154,7 +154,7 @@ The right side contains four major sections:
 - timed rows with `x`, `y`, `z`
 
 3. `Camera Velocity (scene frame)`
-- timed rows with `x`, `y`, `z`
+- timed rows with `vˣ`, `vʸ`, `vᶻ`
 
 4. `Camera Orientation (turns)`
 - timed rows with `pitch`, `yaw`

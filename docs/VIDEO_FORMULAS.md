@@ -175,7 +175,7 @@ The Video Renderer has three timed formula sections:
 1. `Camera Location`
    - `x`, `y`, `z`
 2. `Camera Velocity (scene frame)`
-   - `x`, `y`, `z`
+   - `vˣ`, `vʸ`, `vᶻ`
 3. `Camera Orientation (turns)`
    - `pitch`, `yaw`
 
@@ -246,9 +246,11 @@ The value must evaluate to a positive integer.
 
 ## Velocity Interpretation
 
+Since the speed of light is not explicitly set anywhere, the units that the Video Renderer expects for velocity are geometrized. So if the user wants to create an explicitly defined value for `c`, then the velocity formulas will need to be divided by that `c`. If any frame has velocity magnitude greater than or equal to `1`, then the Video Renderer will throw an error.
+
 Camera velocity formulas are entered as:
 
-- `x`, `y`, `z` components in the **scene frame**
+- `vˣ`, `vʸ`, `vᶻ` components in the **scene frame**
 
 The renderer converts those components into:
 - aberration speed
@@ -264,9 +266,9 @@ It is:
 Example:
 
 ```text
-x = 0.5
-y = 0
-z = -0.5
+vˣ = 0.5
+vʸ = 0
+vᶻ = -0.5
 ```
 
 This will be converted internally into the aberration representation used by the renderer.
@@ -290,8 +292,6 @@ means one eighth of a full turn.
 
 ## Example: Hyperbolic Motion
 
-This is a simplified example in the same style as your existing presets.
-
 Definitions:
 
 ```text
@@ -304,7 +304,7 @@ halfway = arcosh(distance / 2 + 1)
 Total frames:
 
 ```text
-int(2 * 60 * halfway)
+int(2 * fps * halfway)
 ```
 
 Camera location row 1:
@@ -312,13 +312,13 @@ Camera location row 1:
 ```text
 x = 0
 y = 1.2
-z = start - cosh(frame / fps) - 1
+z = start - cosh(time) - 1
 ```
 
 Range end:
 
 ```text
-int(60 * halfway)
+int(fps * halfway)
 ```
 
 Camera location row 2:
@@ -326,29 +326,29 @@ Camera location row 2:
 ```text
 x = 0
 y = 1.2
-z = cosh(frame / fps - 2 * halfway) - 1 + start - distance
+z = cosh(time - 2 * halfway) - 1 + end
 ```
 
 Camera velocity row 1:
 
 ```text
-x = 0
-y = 0
-z = tanh(frame / fps)
+vˣ = 0
+vʸ = 0
+vᶻ = tanh(time)
 ```
 
 Range end:
 
 ```text
-int(60 * halfway)
+int(fps * halfway)
 ```
 
 Camera velocity row 2:
 
 ```text
-x = 0
-y = 0
-z = -tanh(frame / fps - 2 * halfway)
+vˣ = 0
+vʸ = 0
+vᶻ = -tanh(time - 2 * halfway)
 ```
 
 Camera orientation:
@@ -360,11 +360,11 @@ yaw = 0
 
 ## Example: Rotating Camera
 
-To make the camera rotate while rendering:
+To make the camera rotate two full turns while rendering in this example:
 
 ```text
 pitch = 0
-yaw = frame / fps / halfway
+yaw = time / halfway
 ```
 
 If this exceeds `1.0`, that is fine. Turns wrap naturally as the renderer uses the value as an angle measure, not as a clamped percentage.
